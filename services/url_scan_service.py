@@ -62,7 +62,7 @@ def extract_domain(url):
     return f"{extracted.domain}.{extracted.suffix}" if extracted.suffix else extracted.domain
 
 
-def scan_url(url, user=None, scan_level='deep'):
+def scan_url(url, user=None, scan_level='deep', guest_id=None):
     """
     Scan a URL using multi-layer caching:
       L1 Redis → L2 UrlCache → L3 DB (recent scan) → L4 External ThreatDetector
@@ -75,21 +75,48 @@ def scan_url(url, user=None, scan_level='deep'):
     cache_key = f"scan_cache:{url_hash}"
     lock_key = f"scan_lock:{url_hash}"
 
-    # ── Check Cache (L1) ────────────────────────────────────────────────────
-    cached_result = cache.get(cache_key)
-    if cached_result:
-        try:
-            parsed = json.loads(cached_result) if isinstance(cached_result, str) else cached_result
-            
-            # Smart Cache Invalidation (Soft Refresh trigger logic can go here)
-            # For now, TTL handles expiration gracefully based on risk
-            
-            parsed['meta'] = parsed.get('meta', {})
-            parsed['meta']['cache_hit'] = True
-            logger.info(f"[CACHE-L1] HIT for {normalized_url} at level {scan_level}")
-            return parsed
-        except Exception:
-            pass
+    # ── [TEMPORARY BYPASS] Check Cache (L1) ─────────────────────────────────
+    # cached_result = cache.get(cache_key)
+    # if cached_result:
+    #     try:
+    #         parsed = json.loads(cached_result) if isinstance(cached_result, str) else cached_result
+    #         
+    #         # Smart Cache Invalidation (Soft Refresh trigger logic can go here)
+    #         # For now, TTL handles expiration gracefully based on risk
+    #         
+    #         parsed['meta'] = parsed.get('meta', {})
+    #         parsed['meta']['cache_hit'] = True
+    #         
+    #         # 🔥 CRITICAL FIX: Even on cache hit, we MUST record the scan 
+    #         # in the user/guest's history so it doesn't disappear from UI.
+    #         try:
+    #             db_scan = Scan.objects.create(
+    #                 user=user if user and user.is_authenticated else None,
+    #                 guest_id=guest_id if not (user and user.is_authenticated) else None,
+    #                 url=normalized_url,
+    #                 url_hash=url_hash,
+    #                 domain=domain,
+    #                 result=parsed.get('result', 'unknown'),
+    #                 safe=parsed.get('safe', None),
+    #                 risk_score=parsed.get('score', 0),
+    #                 score=parsed.get('score', 0),
+    #                 source='cache',
+    #                 ip_address=parsed.get('ip_address'),
+    #                 threats_count=parsed.get('threats_count', 0),
+    #             )
+    #             
+    #             # Include the real db ID so the frontend can sync it properly
+    #             parsed['id'] = str(db_scan.id)
+    #             parsed['scanned_at'] = db_scan.created_at.isoformat()
+    #         except Exception as e:
+    #             logger.error(f"[HISTORY] Failed to save history for cache hit: {e}")
+    #
+    #         logger.info(f"[CACHE-L1] HIT for {normalized_url} at level {scan_level}")
+    #         return parsed
+    #     except Exception as e:
+    #         logger.error(f"[CACHE-L1] Cache parsing failed, generating new: {e}")
+    #         pass
+    logger.info(f"[BYPASS] Skipping L1-L3 cache layers for {normalized_url}")
 
     # ── Distributed lock (max 2s wait) ──────────────────────────────────────
     lock_acquired = False
@@ -125,6 +152,7 @@ def scan_url(url, user=None, scan_level='deep'):
         # ── Save to DB ──────────────────────────────────────────────────────────
         scan = Scan.objects.create(
             user=user if user and user.is_authenticated else None,
+            guest_id=guest_id if not (user and user.is_authenticated) else None,
             url=normalized_url,
             url_hash=url_hash,
             domain=domain,
@@ -212,9 +240,16 @@ def scan_url(url, user=None, scan_level='deep'):
             }
         }
         
+        # Add the DB scan ID dynamically AFTER caching, so it's not cached with the same ID for everyone
+        final_result["id"] = str(scan.id)
+        
         # Prevent Cache Pollution by not caching 'unknown' results
         if status_text != 'unknown':
-            cache.set(cache_key, json.dumps(final_result), timeout=final_ttl)
+            # Create a copy without 'id' to store in Cache (so each user gets their own ID)
+            cache_copy = dict(final_result)
+            cache_copy.pop("id", None)
+            cache_copy.pop("scanned_at", None) # Timestamp should be fresh per user
+            cache.set(cache_key, json.dumps(cache_copy), timeout=final_ttl)
             
         return final_result
 
