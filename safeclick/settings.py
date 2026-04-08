@@ -27,6 +27,7 @@ else:
 VIRUSTOTAL_API_KEY = os.getenv('VIRUSTOTAL_API_KEY', '')
 GOOGLE_SAFE_BROWSING_API_KEY = os.getenv('GOOGLE_SAFE_BROWSING_API_KEY', '')
 
+
 # ========== التطبيقات ==========
 INSTALLED_APPS = [
     'jazzmin',  # Professional UI theme
@@ -36,6 +37,11 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    # 'domain_analysis',
+
+
+
+
     
     # Third party
     'rest_framework',
@@ -88,11 +94,11 @@ WSGI_APPLICATION = 'safeclick.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('safeclick_db', 'safeclick_db'),
-        'USER': os.getenv('safeclick_user', 'safeclick_user'),
-        'PASSWORD': os.getenv('123456', '123456'),
-        'HOST': os.getenv('localhost', 'localhost'),
-        'PORT': os.getenv('5432', '5432'),
+        'NAME': os.getenv('DB_NAME', 'safeclick_db'),
+        'USER': os.getenv('DB_USER', 'safeclick_user'),
+        'PASSWORD': os.getenv('DB_PASSWORD', '123456'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
 

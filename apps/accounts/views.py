@@ -23,7 +23,24 @@ from .serializers import (
 )
 from .email_templates import EMAIL_VERIFICATION_TEMPLATE, PASSWORD_RESET_TEMPLATE
 
+from apps.scans.models import Scan
+from uuid import UUID
+
 logger = logging.getLogger(__name__)
+
+def merge_guest_scans(user, request):
+    """دمج فحوصات الزائر مع حساب المستخدم عند تسجيل الدخول"""
+    guest_id_str = request.headers.get("X-Guest-ID")
+    if not guest_id_str:
+        return
+    
+    try:
+        guest_id = UUID(guest_id_str)
+        updated_count = Scan.objects.filter(guest_id=guest_id, user__isnull=True).update(user=user, guest_id=None)
+        if updated_count > 0:
+            logger.info(f"Merged {updated_count} scans from Guest {guest_id} to User {user.email}")
+    except (ValueError, TypeError):
+        pass
 
 def get_client_ip(request):
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
@@ -225,6 +242,8 @@ class VerifyOTPView(APIView):
                     logger.info(f"OTP Verified & Account Created: {email}")
                     verification.delete()
                     
+                    merge_guest_scans(user, request)
+                    
                     return Response({
                         'success': True,
                         'message': 'Account created successfully',
@@ -320,6 +339,8 @@ class LoginView(APIView):
             user = serializer.validated_data['user']
             
             refresh = RefreshToken.for_user(user)
+            
+            merge_guest_scans(user, request)
             
             return Response({
                 'success': True,
@@ -529,6 +550,9 @@ class GoogleLoginView(APIView):
 
             # Generate tokens
             refresh = RefreshToken.for_user(user)
+            
+            merge_guest_scans(user, request)
+            
             return Response({
                 'success': True,
                 'user': UserSerializer(user).data,

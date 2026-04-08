@@ -21,10 +21,6 @@ media/
 staticfiles/
 static/
 
-# Environment variables
-.env
-*.env
-
 # IDE
 .vscode/
 .idea/
@@ -37,3 +33,7 @@ static/
 logs/
 media/profile_images/
 *.pid
+
+*.csv
+
+*.txt

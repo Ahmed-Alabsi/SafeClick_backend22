@@ -12,6 +12,7 @@ class Scan(models.Model):
         null=True,
         blank=True
     )
+    guest_id = models.UUIDField(db_index=True, null=True, blank=True)
     
     url = models.URLField(max_length=2000)
     url_hash = models.CharField(max_length=64, db_index=True, null=True, blank=True)

@@ -8,7 +8,21 @@ from .serializers import ScanResultSerializer, ScanLinkSerializer
 from services.url_scan_service import scan_url
 import logging
 
+from django.db.models import Q
+from uuid import UUID
+from django.conf import settings
+
 logger = logging.getLogger(__name__)
+
+def get_valid_guest_id(request):
+    """التحقق من صحة وصيغة المعرف الخاص بالزائر"""
+    guest_id = request.headers.get("X-Guest-ID")
+    if not guest_id:
+        return None
+    try:
+        return UUID(guest_id)
+    except (ValueError, TypeError):
+        return None
 
 class ScanLinkView(APIView):
     """فحص رابط جديد — Phase 5/Guest Support: Authentication Optional but with stricter rate limiting for guests."""
@@ -21,7 +35,8 @@ class ScanLinkView(APIView):
     throttle_classes = [ScanRateThrottle]
 
     def post(self, request):
-        user_identifier = request.user.email if request.user.is_authenticated else "Guest"
+        guest_id = get_valid_guest_id(request)
+        user_identifier = request.user.email if request.user.is_authenticated else f"Guest:{guest_id or 'Unknown'}"
         logger.info("[SCAN] طلب فحص رابط من: %s", user_identifier)
         
         serializer = ScanLinkSerializer(data=request.data)
@@ -30,6 +45,10 @@ class ScanLinkView(APIView):
             link = serializer.validated_data['link']
             scan_level = serializer.validated_data.get('scan_level', 'deep')
             logger.info("[SCAN] الرابط: %s | مستوى الفحص: %s", link, scan_level)
+            
+            is_guest = not request.user.is_authenticated
+            # Note: Stricter rate limiting is handled by throttle_classes, not by scan counts anymore.
+
 
             import time
             start_time = time.time()
@@ -37,7 +56,7 @@ class ScanLinkView(APIView):
             try:
                 # If the user is authenticated, pass the user object, otherwise pass None
                 user = request.user if request.user.is_authenticated else None
-                service_result = scan_url(link, user, scan_level)
+                service_result = scan_url(link, user, scan_level, guest_id=guest_id)
                 
                 duration = time.time() - start_time
                 meta = service_result.get('meta', {})
@@ -84,22 +103,33 @@ class ScanLinkView(APIView):
                     'success': False,
                     'message': 'حدث خطأ أثناء الفحص'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        return Response({
-            'success': False,
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 
 class ScanHistoryView(APIView):
     """عرض سجل الفحوصات — Phase 3: optimized query"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
-        # Use .only() to avoid loading heavy JSON fields; limit to 50 most recent.
+        guest_id = get_valid_guest_id(request)
+        
+        # تصفية حسب المستخدم المسجل أو المعرف الفريد للزائر
+        if request.user.is_authenticated:
+            query = Q(user=request.user)
+        elif guest_id:
+            query = Q(guest_id=guest_id, user__isnull=True)
+        else:
+            return Response({
+                'success': True,
+                'history': [],
+                'message': 'No identity found (User or Guest ID)'
+            })
+
         scans = (
             Scan.objects
-            .filter(user=request.user, deleted_at__isnull=True)
+            .filter(query)
+            .filter(deleted_at__isnull=True)
             .only('id', 'url', 'result', 'safe', 'risk_score', 'created_at', 'domain', 'threats_count')
             .order_by('-created_at')[:50]
         )
