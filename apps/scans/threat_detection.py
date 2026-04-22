@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 from django.conf import settings
 import tldextract
+from apps.core.utils.monitoring import monitor_engine
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +55,11 @@ class ThreatDetector:
         }
     }
 
+    @monitor_engine("virustotal")
     def detect(self, url: str, scan_level: str = 'deep') -> dict:
         """Run threat detection strictly using external GSB and VT lookups."""
         logger.info(f"[ThreatDetector] Starting EXTERNAL scan: {url[:80]}")
         url = self._normalize_url(url)
-        start_time = time.time()
 
         try:
             extracted = tldextract.extract(url)
@@ -121,7 +122,6 @@ class ThreatDetector:
                  self.results['scan_failed'] = True
 
         self._calculate_final_score()
-        self.results['response_time'] = round(time.time() - start_time, 2)
         return self.results
 
     def _normalize_url(self, url: str) -> str:

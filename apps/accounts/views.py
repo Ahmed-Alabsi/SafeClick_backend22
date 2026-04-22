@@ -1,4 +1,5 @@
 # apps/accounts/views.py
+import jwt
 import secrets
 import logging
 from datetime import timedelta
@@ -15,8 +16,9 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.conf import settings
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+from google.auth.transport import requests as google_requests
 
-from .models import User, EmailVerification, IPAttempt
+from .models import User, EmailVerification, IPAttempt, GuestSession
 from .serializers import (
     UserSerializer, RegisterSerializer, LoginSerializer,
     SendOTPSerializer, VerifyOTPSerializer, ResendOTPSerializer
@@ -568,3 +570,31 @@ class GoogleLoginView(APIView):
         except Exception as e:
             logger.error(f"Google Login Error: {e} (IP: {ip})")
             return Response({'success': False, 'message': 'حدث خطأ غير متوقع'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class GuestRegisterView(APIView):
+    """تسجيل جلسة زائر جديدة وإصدار JWT محدود"""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        ip = get_client_ip(request)
+        guest = GuestSession.objects.create(ip_address=ip)
+        
+        # إنشاء JWT للزائر يحمل هويته
+        payload = {
+            'guest_id': str(guest.id),
+            'exp': timezone.now() + timedelta(days=7),
+            'iat': timezone.now(),
+            'is_guest': True,
+            'type': 'guest_access'
+        }
+        
+        token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+        
+        logger.info(f"[AUTH] جلسة زائر جديدة: {guest.id} (IP: {ip})")
+        
+        return Response({
+            'success': True,
+            'guest_id': str(guest.id),
+            'access_token': token,
+            'max_scans': getattr(settings, 'FREE_GUEST_SCANS_LIMIT', 3)
+        }, status=status.HTTP_201_CREATED)

@@ -22,16 +22,13 @@ class CreateReportView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        print("\n" + "="*50)
-        print("📥 استقبال بلاغ جديد")
-        print("="*50)
-        print(f"المستخدم: {request.user.name}")
-        print(f"البيانات المستقبلة: {request.data}")
+        logger.info(f"📥 استقبال بلاغ جديد من المستخدم: {request.user.name}")
+        logger.debug(f"البيانات المستقبلة: {request.data}")
         
         serializer = CreateReportSerializer(data=request.data)
         
         if serializer.is_valid():
-            print("✅ البيانات صحيحة")
+            logger.info("✅ البيانات صحيحة")
             
             # إنشاء البلاغ
             report = Report(

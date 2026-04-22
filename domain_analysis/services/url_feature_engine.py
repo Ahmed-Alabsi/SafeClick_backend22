@@ -42,7 +42,10 @@ def analyze_url_structure(url: str) -> Dict[str, Any]:
         path = parsed.path
         # Detect %XX or @ or other suspicious chars
         has_encoded_chars = bool(re.search(r"%[0-9a-fA-F]{2}", path))
-        has_at_symbol = "@" in url
+        
+        # Decode URL to catch encoded evasions (like %40 for @)
+        decoded_url = urllib.parse.unquote(url)
+        has_at_symbol = "@" in decoded_url
         
         return {
             "status": "ok",

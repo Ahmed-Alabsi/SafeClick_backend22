@@ -1,17 +1,28 @@
+"""
+Trie Index (v4.1 - Memory Optimized)
+─────────────────────────────────────
+Provides fast prefix search for candidate generation in Typosquatting detection.
+Indexes the Top 1M domains to maintain sub-second response times and stable memory.
+"""
+
 import marisa_trie
-from .dataset_loader import load_domains
 import threading
+import logging
+from .dataset_loader import load_ranked_domains
+
+logger = logging.getLogger(__name__)
 
 _trie_instance = None
 _lock = threading.Lock()
 
 def build_trie():
-    """Initializes and returns a Trie with legitimate domains."""
-    domains = load_domains()
+    """Initializes a Trie with Top 1M legitimate domains for efficient search."""
+    logger.info("Building Trie Index for candidate generation...")
+    domains = load_ranked_domains(limit=1000000)
     return marisa_trie.Trie(domains)
 
 def get_trie():
-    """Thread-safe singleton getter for the Trie."""
+    """Thread-safe singleton getter."""
     global _trie_instance
     if _trie_instance is None:
         with _lock:
@@ -19,12 +30,12 @@ def get_trie():
                 _trie_instance = build_trie()
     return _trie_instance
 
-def get_candidates(prefix):
+def get_candidates(prefix: str):
     """Returns all keys in the trie starting with the given prefix."""
+    if not prefix: return []
     t = get_trie()
-    if t is None:
-        return []
     try:
         return t.keys(prefix)
-    except:
+    except Exception as e:
+        logger.error(f"Trie search failed for prefix '{prefix}': {e}")
         return []

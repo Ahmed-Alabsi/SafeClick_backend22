@@ -37,23 +37,23 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    # 'domain_analysis',
 
-
-
-
-    
     # Third party
     'rest_framework',
     'corsheaders',
     'rest_framework_simplejwt',
-    
+
     # Local apps
     'apps.accounts',
-    'apps.scans',
+    'apps.scans.apps.ScansConfig',
     'apps.reports',
     'apps.core',
     'apps.feedback',
+    'apps.domains',        # Domain intelligence
+    'apps.ai',             # AI model management
+    'apps.monitoring',     # Engine health monitoring
+    'domain_analysis',     # Heuristic analysis engines
+    'apps.admin_api',      # Headless Admin Dashboard APIs
 ]
 
 # ========== Middleware ==========
@@ -99,48 +99,45 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD', '123456'),
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
+        'CONN_MAX_AGE': 60,
     }
 }
 
 # ========== التخزين المؤقت (Redis) ==========
-# REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1')
+REDIS_URL = os.getenv('REDIS_URL', 'redis://:StrongPassword123!@127.0.0.1:6379/1')
 
-# Redis cache disabled temporarily as per user request
-# try:
-#     import django_redis
-#     import redis
-#     
-#     # Try to ping the Redis server rapidly to see if it's actually alive
-#     redis_test_client = redis.Redis.from_url(REDIS_URL, socket_connect_timeout=0.2)
-#     redis_test_client.ping()
-#     
-#     CACHES = {
-#         "default": {
-#             "BACKEND": "django_redis.cache.RedisCache",
-#             "LOCATION": REDIS_URL,
-#             "OPTIONS": {
-#                 "CLIENT_CLASS": "django_redis.client.DefaultClient",
-#                 "IGNORE_EXCEPTIONS": True,
-#                 "SOCKET_CONNECT_TIMEOUT": 2,
-#                 "SOCKET_TIMEOUT": 2,
-#             }
-#         }
-#     }
-# except (ImportError, redis.exceptions.ConnectionError, redis.exceptions.TimeoutError, Exception) as e:
-#     # Redis not installed OR server is down — use in-memory cache
-#     print(f"ℹ️ [Cache] Redis unavailable ({str(e).split()[0]}). Falling back to LocMemCache.")
-#     CACHES = {
-#         "default": {
-#             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-#         }
-#     }
+try:
+    import django_redis
+    import redis
 
-# Use LocMemCache as default
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    # Ping Redis to see if it's alive
+    redis_test_client = redis.Redis.from_url(REDIS_URL, socket_connect_timeout=2.0)
+    redis_test_client.ping()
+
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "IGNORE_EXCEPTIONS": True,
+                "SOCKET_CONNECT_TIMEOUT": 2,
+                "SOCKET_TIMEOUT": 2,
+            },
+            "KEY_PREFIX": "safeclick",
+        }
     }
-}
+except Exception as e:
+    # Redis not available — fallback to in-memory cache
+    import logging
+    logging.getLogger(__name__).warning(
+        f"Redis unavailable ({type(e).__name__}). Falling back to LocMemCache."
+    )
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        }
+    }
 
 # ========== التحقق من كلمة المرور ==========
 AUTH_PASSWORD_VALIDATORS = [
@@ -217,6 +214,9 @@ REST_FRAMEWORK = {
     'DATETIME_FORMAT': '%Y-%m-%d %H:%M:%S',
 }
 
+# ========== حدود الاستخدام ==========
+FREE_GUEST_SCANS_LIMIT = 3
+
 DEFAULT_CHARSET = 'utf-8'
 
 # ========== JWT Settings ==========
@@ -245,6 +245,8 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "http://192.168.8.122:3000",
     "http://192.168.8.122:8000",
 ]
@@ -258,8 +260,7 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # ========== API Keys ==========
-VIRUSTOTAL_API_KEY = os.getenv('VIRUSTOTAL_API_KEY', '')
-GOOGLE_SAFE_BROWSING_API_KEY = os.getenv('GOOGLE_SAFE_BROWSING_API_KEY', '')
+# Note: VIRUSTOTAL_API_KEY and GOOGLE_SAFE_BROWSING_API_KEY already defined above (line 27-28)
 GOOGLE_WEB_CLIENT_ID = os.getenv('GOOGLE_WEB_CLIENT_ID', '')
 
 # ========== Email Settings (Gmail SMTP) ==========
@@ -267,9 +268,9 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'safeclicK17@gmail.com'
-EMAIL_HOST_PASSWORD = 'jczy igib ztum ahku'
-DEFAULT_FROM_EMAIL = 'SafeClick <safeclick17@gmail.com>'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'SafeClick <safeclick17@gmail.com>')
 
 # ========== Logging ==========
 LOGS_DIR = BASE_DIR / 'logs'
@@ -332,7 +333,6 @@ JAZZMIN_SETTINGS = {
     "icons": {
         "accounts.User": "fas fa-users",
         "scans.Scan": "fas fa-shield-alt",
-        "scans.Link": "fas fa-link",
         "scans.Blacklist": "fas fa-ban",
         "reports.Report": "fas fa-flag",
         "reports.ReportComment": "fas fa-comments",

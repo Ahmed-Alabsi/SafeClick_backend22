@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-900: #1e3a8a;
+  
+  --color-dark-50: #f8fafc;
+  --color-dark-100: #f1f5f9;
+  --color-dark-700: #334155;
+  --color-dark-800: #1e293b;
+  --color-dark-900: #0f172a;
+  --color-dark-950: #020617;
+}
+
+/* Base styles */
+@layer base {
+  body {
+    background-color: var(--color-dark-950);
+    color: #e2e8f0;
+    -webkit-font-smoothing: antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background-color: var(--color-dark-900);
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-dark-800);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-dark-700);
+}
+
+/* Glassmorphism utilities */
+@utility glass {
+  background-color: color-mix(in srgb, var(--color-dark-900) 50%, transparent);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-dark-800);
+}
+@utility glass-card {
+  background-color: color-mix(in srgb, var(--color-dark-900) 40%, transparent);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--color-dark-800);
+  border-radius: 0.75rem;
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+@utility glass-badge {
+  background-color: color-mix(in srgb, var(--color-dark-800) 50%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--color-dark-700);
+}
+
+@utility glass-input {
+  background-color: color-mix(in srgb, var(--color-dark-900) 80%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--color-dark-800);
+  transition: all 0.2s ease-in-out;
+
+  &:focus {
+    border-color: var(--color-primary-500);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary-500) 20%, transparent);
+  }
+}

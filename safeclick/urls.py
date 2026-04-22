@@ -11,6 +11,8 @@ urlpatterns = [
     path('api/scans/', include('apps.scans.urls')),
     path('api/reports/', include('apps.reports.urls')),
     path('api/feedback/', include('apps.feedback.urls')),
+    path('api/admin/', include('apps.admin_api.urls')),
+    path('api/monitoring/', include('apps.monitoring.urls')),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 ]
 

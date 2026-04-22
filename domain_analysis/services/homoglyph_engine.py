@@ -12,15 +12,7 @@ import idna
 import unicodedata
 from typing import Dict, Any, List
 from confusable_homoglyphs import confusables
-
-
-# Latin character pairs that look like other characters at small font sizes
-LATIN_TRICKS = {
-    "rn": "m",   # rn looks like m
-    "cl": "d",   # cl looks like d
-    "vv": "w",   # vv looks like w
-    "nn": "m",   # nn can look like m in some fonts
-}
+from .constants import LATIN_TRICKS
 
 
 def _detect_latin_tricks(domain: str) -> list:

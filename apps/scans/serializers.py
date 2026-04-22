@@ -7,22 +7,25 @@ class ScanResultSerializer(serializers.ModelSerializer):
         model = Scan
         fields = [
             'id', 'url', 'url_hash', 'domain', 'ip_address',
-            'safe', 'score', 'risk_score', 'result', 'details', 'threats_found',
-            'threats_count', 'response_time', 'server_info', 'created_at', 'timestamp'
+            'safe', 'score', 'risk_score', 'safety_score', 'result', 'details', 'threats_found',
+            'threats_count', 'response_time', 'server_info', 'created_at', 'timestamp',
+            'scan_scenario', 'reason'
         ]
     
     def to_representation(self, instance):
         """تنسيق البيانات للعرض"""
         data = super().to_representation(instance)
         
-        # تنسيق التفاصيل كنصوص
-        if isinstance(data.get('details'), list):
-            data['details'] = [str(d) for d in data['details']]
+        # Human readable status summary for Flutter
+        data['status_summary'] = f"{instance.result} - {instance.reason}"
         
         # Flutter Model Alignment
         data['ipAddress'] = data.get('ip_address')
         data['responseTime'] = data.get('response_time')
         data['timestamp'] = data.get('created_at')
+        
+        # Detailed report passed through details field
+        data['detailed_report'] = instance.details
         
         # إضافة الحالة النصية
         if data['safe'] == True:
