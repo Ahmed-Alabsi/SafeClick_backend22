@@ -1,9 +1,13 @@
+import os
+import tempfile
 import tldextract
 import ipaddress
 from typing import Optional
 
-# Pre-initialize extractor for performance
-extractor = tldextract.TLDExtract(cache_dir=True)
+# Pre-initialize extractor with a proper cache directory
+# (cache_dir=True creates a literal "True" folder — this is a known tldextract bug)
+_TLDEXTRACT_CACHE = os.path.join(tempfile.gettempdir(), '.safeclick_tldextract_cache')
+extractor = tldextract.TLDExtract(cache_dir=_TLDEXTRACT_CACHE)
 
 def extract_domain_info(url: str) -> dict:
     """

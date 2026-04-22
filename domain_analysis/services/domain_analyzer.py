@@ -1,9 +1,9 @@
 import logging
 import json
 import hashlib
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Any
-
+import asyncio
+from typing import Dict, Any, Optional
+from urllib.parse import urlparse, parse_qs, unquote
 import os
 import datetime
 
@@ -23,7 +23,8 @@ try:
 except ImportError:
     cache = None
 
-from .domain_utils import extract_domain
+from apps.core.utils.monitoring import monitor_engine
+from .domain_utils import extract_domain, extract_domain_info
 from .domain_age import get_domain_age
 from .typosquatting_engine import detect_typosquatting
 from .url_feature_engine import analyze_url_structure
@@ -32,88 +33,184 @@ from .homoglyph_engine import detect_homoglyph_attack
 from .dns_intelligence_engine import analyze_dns
 from .ssl_intelligence_engine import analyze_ssl
 from .threat_intelligence import check_openphish
-from .url_unshortener_engine import unshorten_url
+from .url_unshortener_engine import unshorten_url, is_shortened_url
 from .risk_scoring import RiskScorer
 from .bloom_filter import get_bloom
+from .async_utils import (
+    execute_with_retry_and_timeout,
+    run_cpu_bound,
+    DNS_CIRCUIT_BREAKER
+)
 
 logger = logging.getLogger(__name__)
 
-# Bounded executor: 8 engines × 3 concurrent users = 24 threads max
-# Avoids excessive thread spawning and OS-level resource exhaustion
-_ANALYSIS_EXECUTOR = ThreadPoolExecutor(max_workers=24)
-
-# Warm-up: Initialize Bloom Filter and Trie on module load
-try:
-    from .trie_index import get_trie
-    get_bloom()
-    get_trie()
-except Exception as e:
-    logger.error(f"Initialization warm-up failed: {e}")
-
-
-def run_engine_safe(name: str, func, *args) -> Dict[str, Any]:
-    """Wraps an engine call to ensure isolated execution with no information leakage."""
+def initialize_engines():
+    """
+    Explicitly warms up all heavy data artifacts (Bloom Filter, Trie, Threat Intelligence).
+    Ensures that real-time analysis doesn't hit lazy-loading timeouts.
+    """
+    logger.info("Initializing Domain Analysis Engines (Warm-up)...")
     try:
-        return func(*args)
+        from .bloom_filter import get_bloom
+        from .trie_index import get_trie
+        from .threat_intelligence import refresh_threat_feeds
+        
+        # Trigger data loading
+        get_bloom()
+        get_trie()
+        refresh_threat_feeds()
+        logger.info("All engines stabilized and datasets loaded.")
     except Exception as e:
-        logger.error(f"Engine {name} failed: {str(e)}", exc_info=True)
-        return {
-            "status": "error",
-            "error": f"Engine {name} encountered an internal error",
-            "details": {}
-        }
+        logger.error(f"Engine initialization failed: {e}")
 
 
-def analyze_domain(url: str, use_cache: bool = True) -> Dict[str, Any]:
+# ── Open Redirect Parameter Names ─────────────────────────────────────
+_REDIRECT_PARAMS = frozenset([
+    "url", "redirect", "redirect_uri", "redirect_url", "return", "returnto",
+    "return_url", "returnurl", "next", "target", "dest", "destination",
+    "rurl", "go", "continue", "forward", "out", "link", "goto",
+    "callback", "ret", "service", "ref", "referer", "to", "redir",
+])
+
+
+def _extract_open_redirect_target(url: str) -> Optional[str]:
     """
-    Orchestrates the domain analysis process with parallel engines, isolation, and caching.
-    Now includes URL unshortening as a pre-processing step.
+    Detects Open Redirect wrappers and extracts the embedded destination URL.
     """
+    try:
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query, keep_blank_values=False)
+        for param_name in _REDIRECT_PARAMS:
+            values = params.get(param_name, [])
+            for val in values:
+                decoded = unquote(val)
+                if decoded.startswith(("http://", "https://")):
+                    return decoded
+    except Exception:
+        pass
+    return None
 
-    # ── PRE-PROCESSING: URL Unshortening ─────────────────────────────────
-    unshortener_result = None
+async def _run_engine_safe(name: str, coro) -> tuple:
+    """Wraps an awaitable engine to ensure isolated execution, standard schema, and latency tracking."""
     
+    # We dynamically create a wrapper to use our central decorator
+    @monitor_engine(name)
+    async def _execute_coro():
+        return await coro
+        
+    result = await _execute_coro()
+    return name, result
+
+
+async def analyze_domain(url: str, use_cache: bool = True, lite_mode: bool = False) -> Dict[str, Any]:
+    """
+    Orchestrates the domain analysis process with parallel Async IO engines,
+    Circuit Breakers, Retries, and clean CPU vs I/O separation.
+    """
+
     # Ensure scheme exists for proper URL parsing, default to http://
     if not url.startswith(("http://", "https://")):
         url = "http://" + url
         
     original_url = url
+    unshortener_result = None
+    open_redirect_result = None
+
+    # ── PRE-PROCESSING: URL Unshortening ─────────────────────────────────
     try:
-        from .url_unshortener_engine import is_shortened_url
         was_shortener = is_shortened_url(url)
+        unshortener_result = await unshorten_url(url)
         
-        unshortener_result = unshorten_url(url)
-        
-        # Determine the final URL after following redirects
         final_url = url
         if unshortener_result.get("status") == "ok":
             resolved = unshortener_result.get("details", {}).get("final_url")
             if resolved and resolved != url:
                 final_url = resolved
         
-        # CRITICAL FIX: If it was a shortener, but we failed to resolve a real destination,
-        # we MUST abort. Analyzing 'bit.ly' or 'tinyurl.com' itself leads to 100% false positives
-        # because the domain is just an infrastructure provider.
+        # Suspect unresolvable shortener links
         if was_shortener and is_shortened_url(final_url):
             error_msg = unshortener_result.get("error", "Unable to resolve short link destination (Network Error or Dead Link)")
-            return {
-                "status": "error",
-                "error": f"Shortened URL resolution failed: {error_msg}",
-                "url": original_url,
-                "resolved_url": final_url,
-                "domain": extract_domain(original_url),
-                "risk_score": 0,
-                "verdict": "ERROR",
-                "analysis_date": timezone.now().isoformat() if django_available else datetime.datetime.now().isoformat()
-            }
             
-        url = final_url  # Use resolved URL for all downstream analysis
+            # Distinguish between our backend network failing vs a dead link
+            is_net_err = any(k in error_msg.lower() for k in ['timeout', 'getaddrinfo', 'connection', 'reset'])
+            
+            if is_net_err:
+                # Backend network failure - DO NOT treat as SAFE (Evasion Vector)
+                # Attackers could block our IP to force a network error and bypass the scan.
+                # Fail-safe: mark as UNKNOWN/SUSPICIOUS.
+                return {
+                    "status": "ok",
+                    "url": original_url,
+                    "resolved_url": final_url,
+                    "domain": extract_domain(original_url),
+                    "risk_score": 50,
+                    "verdict": "UNKNOWN",
+                    "confidence": 0.4,
+                    "evidence": [{
+                        "signal": "url_shortener",
+                        "evidence": f"Network error resolving short link (Possible Evasion): {error_msg}.",
+                        "severity": "MEDIUM",
+                        "weight": 50
+                    }],
+                    "engines": {
+                        "url_unshortener": unshortener_result or {"status": "error"}
+                    },
+                    "analysis_date": timezone.now().isoformat() if django_available else datetime.datetime.now().isoformat()
+                }
+            else:
+                # Dead link or malicious block - suspicious
+                return {
+                    "status": "ok",
+                    "url": original_url,
+                    "resolved_url": final_url,
+                    "domain": extract_domain(original_url),
+                    "risk_score": 50,
+                    "verdict": "SUSPICIOUS",
+                    "confidence": 0.4,
+                    "evidence": [{
+                        "signal": "url_shortener",
+                        "evidence": f"Shortened URL could not be resolved: {error_msg}",
+                        "severity": "MEDIUM",
+                        "weight": 50
+                    }],
+                    "engines": {
+                        "url_unshortener": unshortener_result or {"status": "error"}
+                    },
+                    "analysis_date": timezone.now().isoformat() if django_available else datetime.datetime.now().isoformat()
+                }
+            
+        url = final_url
         
     except Exception as e:
         logger.warning(f"URL unshortener failed for {url}: {e}")
         unshortener_result = {"status": "error", "error": str(e), "details": {"was_shortened": False}}
 
+    # ── PRE-PROCESSING: Open Redirect Detection ──────────────────────────
+    try:
+        redirect_target = _extract_open_redirect_target(url)
+        if redirect_target:
+            wrapper_domain = extract_domain(url)
+            target_domain = extract_domain(redirect_target)
+            if target_domain and target_domain != wrapper_domain:
+                logger.info(f"Open Redirect detected: {wrapper_domain} → {target_domain}")
+                open_redirect_result = {
+                    "status": "ok",
+                    "details": {
+                        "is_open_redirect": True,
+                        "wrapper_url": url,
+                        "wrapper_domain": wrapper_domain,
+                        "target_url": redirect_target,
+                        "target_domain": target_domain,
+                    }
+                }
+                url = redirect_target
+    except Exception as e:
+        logger.warning(f"Open redirect detection failed: {e}")
+
     domain = extract_domain(url)
+    info = extract_domain_info(url)
+    fqdn = info.get("fqdn") or domain
+    root_domain = info.get("registrable_domain", "").lower()
 
     if not domain:
         return {
@@ -126,8 +223,9 @@ def analyze_domain(url: str, use_cache: bool = True) -> Dict[str, Any]:
             "analysis_date": timezone.now().isoformat() if django_available else datetime.datetime.now().isoformat()
         }
 
-    # ── Redis Caching Layer ────────────────────────────────────────────────
-    cache_key = f"domain_analysis:{hashlib.sha256(domain.encode()).hexdigest()}"
+    # Cache by full URL (not just domain) to prevent path-level collisions.
+    # e.g. evil.com/login and evil.com/about must NOT share cache entries.
+    cache_key = f"domain_analysis:{hashlib.sha256(url.encode()).hexdigest()}"
     if use_cache and cache:
         cached_result = cache.get(cache_key)
         if cached_result:
@@ -139,29 +237,34 @@ def analyze_domain(url: str, use_cache: bool = True) -> Dict[str, Any]:
                 pass
 
     # ── FAST-PATH: Global Master Whitelist Bypass ──────────────────────────
-    GENERIC_PROVIDERS = {
-        "us.com", "uk.com", "eu.com", "de.com", "jp.net", "ru.com", "ae.org", "hu.com", "kr.com", "qc.com", "uy.com",
-        "za.com", "br.com", "cn.com", "sa.com", "se.com", "se.net", "uk.net", "gb.com", "gb.net", "no.com", "hu.net",
-        "jpn.com", "gr.com", "co.com", "github.io", "vercel.app", "netlify.app", "herokuapp.com", "firebaseapp.com",
-        "duckdns.org", "ngrok.io", "bit.ly", "tinyurl.com", "s3.amazonaws.com", "blob.core.windows.net", "web.app",
-        "s3.platform.com", "pages.dev", "azurewebsites.net"
-    }
+    from .constants import SHARED_HOSTING_PROVIDERS, COUNTRY_CODE_SLDS
+    GENERIC_PROVIDERS = SHARED_HOSTING_PROVIDERS | COUNTRY_CODE_SLDS
 
     try:
         from .dataset_loader import SAFETY_WHITELIST
-        from .domain_utils import extract_domain_info
-        info = extract_domain_info(url)
         is_provider = domain in GENERIC_PROVIDERS
         has_subdomain = bool(info.get("subdomain"))
+        is_whitelisted = domain in SAFETY_WHITELIST and not (is_provider and has_subdomain)
+        
+        url_lower = url.lower()
+        risky_keywords = [
+            "download", "feed", "api", "raw", "login", "signin", 
+            "auth", "verify", "account", "update", "free", "gift", 
+            "malware", "test", "sample", "payload", "suspicious",
+            ".exe", ".zip", ".msi", ".apk", ".sh", ".bat", "?hl="
+        ]
+        is_risky_context = any(k in url_lower for k in risky_keywords)
 
-        # ONLY fast-path if it's strictly in the curated SAFETY_WHITELIST
-        if domain in SAFETY_WHITELIST and not (is_provider and has_subdomain):
+        if is_whitelisted and not is_risky_context:
             fast_path_result = {
                 "url": original_url,
                 "resolved_url": url,
                 "domain": domain,
                 "risk_score": 0,
                 "verdict": "SAFE",
+                # M#5 FIX: Always include confidence for API consistency.
+                # A whitelisted domain has maximum confidence (1.0).
+                "confidence": 1.0,
                 "raw_score": 0,
                 "component_scores": {},
                 "status": "ok",
@@ -174,58 +277,60 @@ def analyze_domain(url: str, use_cache: bool = True) -> Dict[str, Any]:
             if use_cache and cache:
                 cache.set(cache_key, fast_path_result, timeout=86400)
             return fast_path_result
+            
     except Exception as e:
         logger.warning(f"Fast-path bypass failed: {e}")
+        is_whitelisted = False
 
-    # Define tasks for parallel execution (name, function, *args)
-    tasks = [
-        ("domain_age", get_domain_age, domain),
-        ("typosquatting", detect_typosquatting, domain),
-        ("url_features", analyze_url_structure, url),
-        ("phishing_patterns", detect_phishing_patterns, url),
-        ("homoglyph", detect_homoglyph_attack, domain),
-        ("dns", analyze_dns, domain),
-        ("ssl", analyze_ssl, domain),
-        ("threat_intelligence", check_openphish, url),
-    ]
+    # ── PARALLEL EXECUTION OF ENGINES (Async I/O & Threaded CPU) ─────────
+    # Clear CPU vs I/O separation. Heavy algorithms offloaded to threads.
+    
+    tasks = []
+    
+    # In lite_mode, skip slow network engines like domain_age and ssl
+    if not lite_mode:
+        # For shared hosting providers, check the root domain age instead of the subdomain.
+        age_target = root_domain if root_domain in SHARED_HOSTING_PROVIDERS else domain
+        tasks.extend([
+            _run_engine_safe("domain_age", get_domain_age(age_target)),
+            _run_engine_safe("ssl", execute_with_retry_and_timeout(
+                "ssl", analyze_ssl, domain, max_retries=1, timeout=5.0
+            )),
+        ])
+
+    # Fast network & CPU engines (run in both modes)
+    tasks.extend([
+        _run_engine_safe("dns", execute_with_retry_and_timeout(
+            "dns", analyze_dns, domain, max_retries=1, timeout=2.0 if lite_mode else 4.0, circuit_breaker=DNS_CIRCUIT_BREAKER
+        )),
+        _run_engine_safe("typosquatting", run_cpu_bound(detect_typosquatting, fqdn)),
+        _run_engine_safe("url_features", run_cpu_bound(analyze_url_structure, url)),
+        _run_engine_safe("phishing_patterns", run_cpu_bound(detect_phishing_patterns, url)),
+        _run_engine_safe("homoglyph", run_cpu_bound(detect_homoglyph_attack, domain)),
+        _run_engine_safe("threat_intelligence", run_cpu_bound(check_openphish, url)),
+    ])
 
     engine_results = {}
-    total_timeout = 12.0  # Generous timeout for network engines
+    
+    # Wait for all engines concurrently
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    for res in results:
+        if isinstance(res, Exception):
+            logger.error(f"Critical Task Gathering Error: {res}")
+            continue
+        
+        name, result = res
+        engine_results[name] = result
 
-    # Use the persistent global executor
-    future_to_engine = {}
-    for task_tuple in tasks:
-        name = task_tuple[0]
-        func = task_tuple[1]
-        args = task_tuple[2:]
-        future = _ANALYSIS_EXECUTOR.submit(run_engine_safe, name, func, *args)
-        future_to_engine[future] = name
-
-    # Wait for all with a strict timeout
-    try:
-        for future in as_completed(future_to_engine, timeout=total_timeout):
-            engine_name = future_to_engine[future]
-            try:
-                result = future.result()
-                engine_results[engine_name] = result
-            except Exception as e:
-                logger.error(f"Engine {engine_name} failed: {e}")
-                engine_results[engine_name] = {"status": "error", "error": "Internal Error"}
-    except TimeoutError:
-        logger.warning(f"Analysis for {domain} partially timed out after {total_timeout}s")
-
-    # Ensure all engines have a result entry (mark timed-out ones)
-    for task_tuple in tasks:
-        name = task_tuple[0]
-        if name not in engine_results:
-            engine_results[name] = {"status": "error", "error": "Timeout"}
-
-    # Include URL unshortener result
-    if unshortener_result:
-        engine_results["url_unshortener"] = unshortener_result
+    # Include Pre-processing Engine Results
+    if unshortener_result: engine_results["url_unshortener"] = unshortener_result
+    if open_redirect_result: engine_results["open_redirect"] = open_redirect_result
+    if 'is_whitelisted' in locals() and is_whitelisted:
+        engine_results["trusted_source"] = {"status": "ok"}
 
     # Calculate final Risk Score and Verdict
-    scoring_result = RiskScorer.calculate(engine_results)
+    scoring_result = RiskScorer.calculate(engine_results, domain, url)
 
     final_output = {
         "url": original_url,
@@ -233,14 +338,15 @@ def analyze_domain(url: str, use_cache: bool = True) -> Dict[str, Any]:
         "domain": domain,
         "risk_score": scoring_result.get("risk_score", 0),
         "verdict": scoring_result.get("verdict", "UNKNOWN"),
-        "raw_score": scoring_result.get("raw_score", 0),
+        "confidence": scoring_result.get("confidence", 0.0),
+        "evidence": scoring_result.get("evidence", []),
+        "raw_score": scoring_result.get("raw_weighted", 0),
         "component_scores": scoring_result.get("component_scores", {}),
         "status": "ok",
         "engines": engine_results,
         "analysis_date": timezone.now().isoformat() if django_available else datetime.datetime.now().isoformat()
     }
 
-    # Cache the result for 24 hours
     if use_cache and cache:
         try:
             cache.set(cache_key, final_output, timeout=86400)

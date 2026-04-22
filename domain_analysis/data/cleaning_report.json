@@ -1,0 +1,1157 @@
+{
+  "total_input": 17438940,
+  "duplicates_removed": 0,
+  "layers": {
+    "layer1": {
+      "name": "Syntax & Format",
+      "removed": 711
+    },
+    "layer2": {
+      "name": "Brand Impersonation",
+      "removed": 24842
+    },
+    "layer3": {
+      "name": "Phishing Patterns",
+      "removed": 50
+    },
+    "layer4": {
+      "name": "Statistical Anomaly",
+      "removed": 56613
+    },
+    "layer5": {
+      "name": "Blacklist Cross-Ref",
+      "removed": 26
+    },
+    "layer6": {
+      "name": "ML Classification",
+      "removed": 0
+    },
+    "layer7": {
+      "name": "TLD Reputation",
+      "removed": 4928
+    }
+  },
+  "quarantined": 0,
+  "clean_output": 17351770,
+  "removal_rate": "0.50%",
+  "elapsed_seconds": 5938.5,
+  "sample_removals": {
+    "layer1": [
+      {
+        "domain": "pokerv.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "rtpjp188.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "prima123.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "elangwins.xn--mk1bu44c",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "netflix.xn--tckwe",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "roomscatter.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "pikachu.xn--unup4y",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "rtpslotpastijp.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "cukongbetwin.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "oke777slot.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "jawara99.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "lordfilm7.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "nic.xn--p1acf",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "ebay.xn--gckr3f0f",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "cukongbetvip.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "altadefinizione.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "konco88gg.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "sniperjitu.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "5758.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "slotbiru.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "toyoslot.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "hokislot128.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "sindo88.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "area188mq.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "area188mw.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "gdjkr1.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "nobartv.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "dev_hirota.jp",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "antikporno.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "anjirtoto1.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "egeporno.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "cukongbetjp.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "abutogel.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "pasti138win.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "nic.xn--55qw42g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "levdela.xn--kpry57d",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "fun77slots.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "area188km.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "rajawin.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "500-400.xn--p1ai",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "manisansurga.xn--q9jyb4c",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "area188tog.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "sihoki.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "rtpobs188a.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "nic.xn--cckwcxetd",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "newvegas99link.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "8956.xn--p1ai",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "pronutra.xn--fiqs8s",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "jepetogel.xn--6frz82g",
+        "reason": "invalid_format"
+      },
+      {
+        "domain": "sayfaporno.xn--6frz82g",
+        "reason": "invalid_format"
+      }
+    ],
+    "layer2": [
+      {
+        "domain": "orole.pl",
+        "reason": "lev_dist_2_from:oracle"
+      },
+      {
+        "domain": "poblex.com",
+        "reason": "lev_dist_2_from:roblox"
+      },
+      {
+        "domain": "capitalofs.com",
+        "reason": "lev_dist_2_from:capitalone"
+      },
+      {
+        "domain": "ukwordpress.com",
+        "reason": "lev_dist_2_from:wordpress"
+      },
+      {
+        "domain": "ricebook.net",
+        "reason": "lev_dist_2_from:facebook"
+      },
+      {
+        "domain": "cortpress.com",
+        "reason": "lev_dist_2_from:wordpress"
+      },
+      {
+        "domain": "facebody.ru",
+        "reason": "lev_dist_2_from:facebook"
+      },
+      {
+        "domain": "strive.school",
+        "reason": "lev_dist_1_from:stripe"
+      },
+      {
+        "domain": "instgram.ru",
+        "reason": "lev_dist_1_from:instagram"
+      },
+      {
+        "domain": "saasforce.co.jp",
+        "reason": "lev_dist_2_from:salesforce"
+      },
+      {
+        "domain": "opencv.jp",
+        "reason": "lev_dist_2_from:openai"
+      },
+      {
+        "domain": "boom.hr",
+        "reason": "lev_dist_1_from:zoom"
+      },
+      {
+        "domain": "redex.fun",
+        "reason": "lev_dist_1_from:fedex"
+      },
+      {
+        "domain": "black.xxx",
+        "reason": "lev_dist_1_from:slack"
+      },
+      {
+        "domain": "openhp.or.jp",
+        "reason": "lev_dist_2_from:openai"
+      },
+      {
+        "domain": "tntdrive.com",
+        "reason": "lev_dist_2_from:onedrive"
+      },
+      {
+        "domain": "tretor.ch",
+        "reason": "lev_dist_1_from:trezor"
+      },
+      {
+        "domain": "d-score.com",
+        "reason": "lev_dist_2_from:discord"
+      },
+      {
+        "domain": "medexe.ru",
+        "reason": "lev_dist_2_from:fedex"
+      },
+      {
+        "domain": "gcolle.xyz",
+        "reason": "lev_dist_2_from:google"
+      },
+      {
+        "domain": "niktor.com",
+        "reason": "lev_dist_2_from:tiktok"
+      },
+      {
+        "domain": "bedexp.com",
+        "reason": "lev_dist_2_from:fedex"
+      },
+      {
+        "domain": "sotify.com",
+        "reason": "lev_dist_2_from:shopify"
+      },
+      {
+        "domain": "orall.gr",
+        "reason": "lev_dist_2_from:oracle"
+      },
+      {
+        "domain": "palpa.fi",
+        "reason": "lev_dist_2_from:paypal"
+      },
+      {
+        "domain": "nextfix.com",
+        "reason": "lev_dist_2_from:netflix"
+      },
+      {
+        "domain": "capitalyse.app",
+        "reason": "lev_dist_2_from:capitalone"
+      },
+      {
+        "domain": "intec.com.my",
+        "reason": "lev_dist_1_from:intel"
+      },
+      {
+        "domain": "dragle.fun",
+        "reason": "lev_dist_2_from:oracle"
+      },
+      {
+        "domain": "balance.pt",
+        "reason": "lev_dist_2_from:binance"
+      },
+      {
+        "domain": "kacle.com",
+        "reason": "lev_dist_2_from:oracle"
+      },
+      {
+        "domain": "timegram.io",
+        "reason": "lev_dist_2_from:telegram"
+      },
+      {
+        "domain": "unps.fr",
+        "reason": "lev_dist_1_from:usps"
+      },
+      {
+        "domain": "felez.co",
+        "reason": "lev_dist_2_from:fedex"
+      },
+      {
+        "domain": "pascal.no",
+        "reason": "lev_dist_2_from:paypal"
+      },
+      {
+        "domain": "toocle.cn",
+        "reason": "lev_dist_2_from:google"
+      },
+      {
+        "domain": "whatsappx.pw",
+        "reason": "lev_dist_1_from:whatsapp"
+      },
+      {
+        "domain": "yamazen.co.jp",
+        "reason": "lev_dist_2_from:amazon"
+      },
+      {
+        "domain": "opera.ca",
+        "reason": "lev_dist_2_from:openai"
+      },
+      {
+        "domain": "gilance.com",
+        "reason": "lev_dist_2_from:binance"
+      },
+      {
+        "domain": "firex.com.br",
+        "reason": "lev_dist_2_from:fedex"
+      },
+      {
+        "domain": "ipic.com",
+        "reason": "lev_dist_1_from:epic"
+      },
+      {
+        "domain": "dombox.eu",
+        "reason": "lev_dist_2_from:dropbox"
+      },
+      {
+        "domain": "fedesp.es",
+        "reason": "lev_dist_2_from:fedex"
+      },
+      {
+        "domain": "orange.it",
+        "reason": "lev_dist_2_from:oracle"
+      },
+      {
+        "domain": "linkedla.com",
+        "reason": "lev_dist_2_from:linkedin"
+      },
+      {
+        "domain": "partal.com",
+        "reason": "lev_dist_2_from:paypal"
+      },
+      {
+        "domain": "opinat.com",
+        "reason": "lev_dist_2_from:openai"
+      },
+      {
+        "domain": "boboox.com",
+        "reason": "lev_dist_2_from:roblox"
+      },
+      {
+        "domain": "imcloud.top",
+        "reason": "lev_dist_1_from:icloud"
+      }
+    ],
+    "layer3": [
+      {
+        "domain": "package-delivery.com",
+        "reason": "compound_pattern:package-delivery"
+      },
+      {
+        "domain": "login-secured.org",
+        "reason": "compound_pattern:login-secure"
+      },
+      {
+        "domain": "windowspasswordsrecovery.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "expire-speed-update-secure.autos",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "mygift-card.com",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "freeprizedrawings.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "account-verify.net",
+        "reason": "compound_pattern:account-verify"
+      },
+      {
+        "domain": "winfreegiftcardsonline.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "chance-specialoffer-win-free.autos",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "connect-truist-account-verify1a.com",
+        "reason": "compound_pattern:account-verify"
+      },
+      {
+        "domain": "freedomtaxaccounting.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "evogift-cards.ru",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "claimfreereward.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "oauth-login-myaccounts-mail.ru",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "beastfree-gifts.in",
+        "reason": "compound_pattern:free-gift"
+      },
+      {
+        "domain": "free-gift.co.kr",
+        "reason": "compound_pattern:free-gift"
+      },
+      {
+        "domain": "free-gifts.org",
+        "reason": "compound_pattern:free-gift"
+      },
+      {
+        "domain": "gift-cardboardbox.com",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "secureaccountpayments.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "tax-refund.ro",
+        "reason": "compound_pattern:tax-refund"
+      },
+      {
+        "domain": "resetwindowspassword.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "action-required.us",
+        "reason": "compound_pattern:action-required"
+      },
+      {
+        "domain": "secureauthlogin.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "gift-cardd.com",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "expirespeedupdatesecure.autos",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "premiumbonusgifts.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "easy-gift-cards.com",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "confirmaccountsecurity.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "getting-gift-cards.com",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "free-giftcard.com",
+        "reason": "compound_pattern:free-gift"
+      },
+      {
+        "domain": "security-check.site",
+        "reason": "compound_pattern:security-check"
+      },
+      {
+        "domain": "gift-cards.ru",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "gift-card.com",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "tax-refunds.co.uk",
+        "reason": "compound_pattern:tax-refund"
+      },
+      {
+        "domain": "unclaimed-taxrefunds.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "gift-card.co.il",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "free-gifts-onweb.com",
+        "reason": "compound_pattern:free-gift"
+      },
+      {
+        "domain": "ibwalletsecurelogin.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "windowsserverpasswordrecovery.net",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "free-giftcodes.com",
+        "reason": "compound_pattern:free-gift"
+      },
+      {
+        "domain": "tax-refund.co.kr",
+        "reason": "compound_pattern:tax-refund"
+      },
+      {
+        "domain": "windowspasswordsreset.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "gift-card.co.nz",
+        "reason": "compound_pattern:gift-card"
+      },
+      {
+        "domain": "winprize-bonus.life",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "tax-refund.com.ua",
+        "reason": "compound_pattern:tax-refund"
+      },
+      {
+        "domain": "truist-account-verify1s.com",
+        "reason": "compound_pattern:account-verify"
+      },
+      {
+        "domain": "recover-windows-password.net",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "account-verify-contact.com",
+        "reason": "compound_pattern:account-verify"
+      },
+      {
+        "domain": "windowsloginrecovery.com",
+        "reason": "keyword_stacking:3_keywords"
+      },
+      {
+        "domain": "level3-security-alerts.org",
+        "reason": "compound_pattern:security-alert"
+      }
+    ],
+    "layer4": [
+      {
+        "domain": "drbsmvnagpur.ac.in",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "etplttsli.xyz",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "zgktryncza.pl",
+        "reason": "consonant_sequence:9"
+      },
+      {
+        "domain": "tywdyjh.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "cqbbzyy.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "ksppsbmtarthabuanametro.co.id",
+        "reason": "consonant_sequence:8"
+      },
+      {
+        "domain": "redefinepropertymgmt.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "xnhnhc334.xyz",
+        "reason": "low_vowel_ratio:0.00"
+      },
+      {
+        "domain": "ncyprshome.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "e-oczyszczacz.pl",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "sjzkmgs.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "svgmsggc.in",
+        "reason": "consonant_sequence:8"
+      },
+      {
+        "domain": "firstrhgroup.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "sgfjbvm.shop",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "trilakeschryslerdodgejeep.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "myndshrooms.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "sffsymposium.org",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "qzszwlw.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "mydfwtx.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "tri-citychryslerdodgejeepram.com",
+        "reason": "consonant_sequence:8"
+      },
+      {
+        "domain": "militarnytygrys.pl",
+        "reason": "consonant_sequence:9"
+      },
+      {
+        "domain": "dbkzhytlobud.com.ua",
+        "reason": "consonant_sequence:8"
+      },
+      {
+        "domain": "findmywhy.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "lismcqspractice.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "drklvnds.de",
+        "reason": "consonant_sequence:8"
+      },
+      {
+        "domain": "sxzxwsy.net",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "cllccqc.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "hblzbybank.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "behealthphysical.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "sscgkgs.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "jerseysnflwholesale.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "stevenscreekchryslerjeepdodge.net",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "bcfdvzx.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "zhx-front-hth.com",
+        "reason": "low_vowel_ratio:0.09"
+      },
+      {
+        "domain": "xnxxxxxxarab.bond",
+        "reason": "consonant_sequence:8"
+      },
+      {
+        "domain": "strssmp.ru",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "bbqstyle.in",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "dgxzxjj.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "lt1rpcdn2.com",
+        "reason": "low_vowel_ratio:0.00"
+      },
+      {
+        "domain": "foxchryslerdodgejeepramtaylor.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "paintmychromosomes.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "smokysbbqsavoy.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "cataclysmsports.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "dsjchbrezno.sk",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "jennypynt.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "counselingpsychology.org",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "lbsgcsnagar.edu.in",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "akmckvsdm32b.com",
+        "reason": "consonant_sequence:8"
+      },
+      {
+        "domain": "bbwxxxvideos.com",
+        "reason": "consonant_sequence:7"
+      },
+      {
+        "domain": "artystyka.eu",
+        "reason": "consonant_sequence:7"
+      }
+    ],
+    "layer5": [
+      {
+        "domain": "typedream.app",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "remenci.cn",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "roblox.com.ge",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "ritsbrowser.com",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "ipfs.io",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "roblox.com.ml",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "b-cdn.net",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "netlify.app",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "dweb.link",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "workers.dev",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "o-shop.com",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "webflow.io",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "backblazeb2.com",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "conohawing.com",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "flazio.com",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "vercel.app",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "r2.dev",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "edoctransfer.com",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "roblox.com.et",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "zeabur.app",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "monday.com",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "gitbook.io",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "linktr.ee",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "roblox.gs",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "dr-roudbaraki.ir",
+        "reason": "in_blacklist"
+      },
+      {
+        "domain": "framer.app",
+        "reason": "in_blacklist"
+      }
+    ],
+    "layer6": [],
+    "layer7": [
+      {
+        "domain": "1win-official-kazino02.top",
+        "reason": "tld_combo:.top+entropy:3.6+long_name"
+      },
+      {
+        "domain": "zerkalo-leonbets-c66y.buzz",
+        "reason": "tld_combo:.buzz+entropy:3.8+long_name"
+      },
+      {
+        "domain": "everydaypurchaseplatform.click",
+        "reason": "tld_combo:.click+entropy:3.8+long_name"
+      },
+      {
+        "domain": "dragonmoney-casino150.top",
+        "reason": "tld_combo:.top+entropy:3.8+long_name"
+      },
+      {
+        "domain": "liposuction-book-latest.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.6+long_name"
+      },
+      {
+        "domain": "leon-zerkalo-official-tchl.buzz",
+        "reason": "tld_combo:.buzz+entropy:3.6+long_name"
+      },
+      {
+        "domain": "electric-bikes-intl-7441012.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.9+long_name"
+      },
+      {
+        "domain": "zerkalo-leonbets-c0lad.top",
+        "reason": "tld_combo:.top+entropy:3.8+long_name"
+      },
+      {
+        "domain": "zerkalo-leonbets-du7o.buzz",
+        "reason": "tld_combo:.buzz+entropy:3.7+long_name"
+      },
+      {
+        "domain": "becas-del-gobierno-peru.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.7+long_name"
+      },
+      {
+        "domain": "zerkalo-leonbets-ineuq.top",
+        "reason": "tld_combo:.top+entropy:3.7+long_name"
+      },
+      {
+        "domain": "autopistavallestamuin.cf",
+        "reason": "tld_combo:.cf+free_tld+long_name"
+      },
+      {
+        "domain": "playfortuna-casino-official29.top",
+        "reason": "tld_combo:.top+entropy:3.8+long_name"
+      },
+      {
+        "domain": "transmittedappearsanimals37.fun",
+        "reason": "tld_combo:.fun+entropy:3.5+long_name"
+      },
+      {
+        "domain": "betwin188-login2.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.6+phishing_keyword"
+      },
+      {
+        "domain": "fictionstanchurches78.fun",
+        "reason": "tld_combo:.fun+entropy:3.7+long_name"
+      },
+      {
+        "domain": "zerkalo-leonbets-ji7f.buzz",
+        "reason": "tld_combo:.buzz+entropy:3.9+long_name"
+      },
+      {
+        "domain": "chungcuoceanparkgialam.click",
+        "reason": "tld_combo:.click+entropy:3.6+long_name"
+      },
+      {
+        "domain": "progressadvancescleanly.click",
+        "reason": "tld_combo:.click+entropy:3.6+long_name"
+      },
+      {
+        "domain": "zerkalo-leonbets-gz4s.buzz",
+        "reason": "tld_combo:.buzz+entropy:3.7+long_name"
+      },
+      {
+        "domain": "vulkanstarscasinoz2023.monster",
+        "reason": "tld_combo:.monster+entropy:3.8+long_name"
+      },
+      {
+        "domain": "champiomofficialkrotsite.top",
+        "reason": "tld_combo:.top+entropy:3.6+long_name"
+      },
+      {
+        "domain": "pinup-win-officials39.top",
+        "reason": "tld_combo:.top+entropy:3.6+long_name"
+      },
+      {
+        "domain": "sankt-peterburg-autoq.top",
+        "reason": "tld_combo:.top+entropy:3.7+long_name"
+      },
+      {
+        "domain": "extensionanalyticspro.top",
+        "reason": "tld_combo:.top+entropy:3.6+long_name"
+      },
+      {
+        "domain": "zerkalo-leonbets-gyynh.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.8+long_name"
+      },
+      {
+        "domain": "thebigandsofisticated4update.top",
+        "reason": "tld_combo:.top+entropy:3.8+long_name+phishing_keyword"
+      },
+      {
+        "domain": "zerkalo-leonbets-d2wn8.top",
+        "reason": "tld_combo:.top+entropy:3.9+long_name"
+      },
+      {
+        "domain": "1wincasino-mobile-z194.buzz",
+        "reason": "tld_combo:.buzz+entropy:3.9+long_name"
+      },
+      {
+        "domain": "rabochee-zerkalo-leon-6819p.top",
+        "reason": "tld_combo:.top+entropy:3.9+long_name"
+      },
+      {
+        "domain": "jetcazzino-topovoye15.top",
+        "reason": "tld_combo:.top+entropy:3.7+long_name"
+      },
+      {
+        "domain": "leonbets-casino-tr12x.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.8+long_name"
+      },
+      {
+        "domain": "zerkalo-leonbets-ssz61.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.7+long_name"
+      },
+      {
+        "domain": "sajt-twin-casino-5u70.buzz",
+        "reason": "tld_combo:.buzz+entropy:3.7+long_name"
+      },
+      {
+        "domain": "bd-verify-vffzah8kjk.click",
+        "reason": "tld_combo:.click+entropy:3.8+phishing_keyword"
+      },
+      {
+        "domain": "casino-leonbets-sq6sf.buzz",
+        "reason": "tld_combo:.buzz+entropy:3.6+long_name"
+      },
+      {
+        "domain": "1xbet-onlinefreecasino.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.7+long_name"
+      },
+      {
+        "domain": "clubnika-casino-0bxsf.top",
+        "reason": "tld_combo:.top+entropy:3.7+long_name"
+      },
+      {
+        "domain": "novosibirsk-pravakupit.top",
+        "reason": "tld_combo:.top+entropy:3.6+long_name"
+      },
+      {
+        "domain": "ternakcuandisinibosku.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.6+long_name"
+      },
+      {
+        "domain": "securityguards-services.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.5+long_name"
+      },
+      {
+        "domain": "findyourmatch.tk",
+        "reason": "tld_combo:.tk+free_tld+entropy:3.7"
+      },
+      {
+        "domain": "lawyerspersonalinjury.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.6+long_name"
+      },
+      {
+        "domain": "betkolikcasinoplatformu.top",
+        "reason": "tld_combo:.top+entropy:3.9+long_name"
+      },
+      {
+        "domain": "representationsbradfordshut30.fun",
+        "reason": "tld_combo:.fun+entropy:3.8+long_name"
+      },
+      {
+        "domain": "happybirthdaywishesboyfriend.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.8+long_name"
+      },
+      {
+        "domain": "zerkalo-leonbets-rg6io.xyz",
+        "reason": "tld_combo:.xyz+entropy:3.8+long_name"
+      },
+      {
+        "domain": "thebetterandfineupdates.top",
+        "reason": "tld_combo:.top+long_name+phishing_keyword"
+      },
+      {
+        "domain": "novosibirsk-pravafast.top",
+        "reason": "tld_combo:.top+entropy:3.6+long_name"
+      },
+      {
+        "domain": "admission-usms-african-stbh.icu",
+        "reason": "tld_combo:.icu+entropy:3.6+long_name"
+      }
+    ]
+  }
+}

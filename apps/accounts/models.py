@@ -29,7 +29,7 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(unique=True)
-    name = models.CharField(max_length=255, unique=True)
+    name = models.CharField(max_length=255)
     profile_image = models.ImageField(
         upload_to='profile_images/', 
         null=True, 
@@ -86,9 +86,25 @@ class EmailVerification(models.Model):
         return f"Verification ({self.purpose}) for {self.email}"
 
 class IPAttempt(models.Model):
-    ip_address = models.GenericIPAddressField()
+    ip_address = models.GenericIPAddressField(unique=True)
     count = models.IntegerField(default=0)
     last_attempt_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.ip_address}: {self.count} attempts"
+
+def get_guest_expiry():
+    return timezone.now() + timedelta(days=7)
+
+class GuestSession(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(default=get_guest_expiry)
+    is_active = models.BooleanField(default=True)
+
+    def is_valid(self):
+        return self.is_active and self.expires_at > timezone.now()
+
+    def __str__(self):
+        return f"Guest {self.id} (Active: {self.is_valid()})"

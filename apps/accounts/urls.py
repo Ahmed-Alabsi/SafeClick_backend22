@@ -14,4 +14,5 @@ urlpatterns = [
     path('verify-reset-otp/', views.VerifyResetOTPView.as_view(), name='verify-reset-otp'),
     path('reset-password/', views.ResetPasswordView.as_view(), name='reset-password'),
     path('google/', views.GoogleLoginView.as_view(), name='google-login'),
+    path('guest/register/', views.GuestRegisterView.as_view(), name='guest-register'),
 ]
