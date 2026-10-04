@@ -3,6 +3,11 @@ import dns.resolver
 import logging
 from typing import Dict, Any
 
+try:
+    from django.core.cache import cache
+except Exception:
+    cache = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,9 +54,22 @@ async def analyze_dns(domain: str) -> Dict[str, Any]:
     """
     Analyzes DNS records for suspicious configurations asynchronously.
     Uses granular resolution status for context-aware risk scoring.
+    Caches resolved DNS records in Redis for 24 hours.
     """
     if not domain:
         return {"status": "error", "error": "No domain provided"}
+
+    domain_clean = domain.lower().strip()
+    cache_key = f"dns_intel:{domain_clean}"
+
+    if cache:
+        try:
+            cached_res = cache.get(cache_key)
+            if cached_res:
+                logger.debug("Returning cached DNS intel for %s", domain_clean)
+                return cached_res
+        except Exception:
+            pass
 
     details = {
         "resolves": False,
@@ -113,10 +131,16 @@ async def analyze_dns(domain: str) -> Dict[str, Any]:
         if details["resolves"] and not details["has_mx"] and not details["has_ns"]:
             details["abnormal_config"] = True
 
-        return {
+        res = {
             "status": "ok",
             "details": details
         }
+        if cache and details.get("resolution_status") not in (DNSStatus.TIMEOUT, DNSStatus.SERVFAIL):
+            try:
+                cache.set(cache_key, res, timeout=86400)
+            except Exception:
+                pass
+        return res
 
     except Exception as e:
         logger.debug(f"DNS analysis failed for {domain}: {str(e)}")

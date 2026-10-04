@@ -8,26 +8,42 @@ Replaces "Load-and-Store" to prevent memory exhaustion and truncation.
 import csv
 import logging
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Optional
 
 logger = logging.getLogger(__name__)
 
-DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "master_whitelist_clean.csv"
+_BASE_DIR = Path(__file__).resolve().parent.parent
+# Look for curated whitelist across standard project locations
+_POSSIBLE_PATHS = [
+    _BASE_DIR / "data" / "master_whitelist_clean.csv",
+    _BASE_DIR / "master_whitelist_clean.csv",
+    _BASE_DIR.parent / "data" / "master_whitelist_clean.csv",
+    _BASE_DIR.parent / "master_whitelist_clean.csv",
+]
+
+def get_whitelist_path() -> Optional[Path]:
+    for p in _POSSIBLE_PATHS:
+        if p.exists():
+            return p
+    return None
+
+DATA_PATH = get_whitelist_path()
 
 # Global cache for the prioritized list (Top 1M only to keep RAM low)
 _RANKED_DOMAINS_CACHE = []
 
 def stream_domains() -> Generator[str, None, None]:
     """
-    Efficiently streams domains from the 307MB CSV file.
+    Efficiently streams domains from CSV dataset if available.
     Memory usage remains constant regardless of file size.
     """
-    if not DATA_PATH.exists():
-        logger.warning(f"Master whitelist not found at {DATA_PATH}")
+    active_path = get_whitelist_path()
+    if not active_path:
+        logger.info(f"External master whitelist CSV not present. Using verified in-memory baseline.")
         return
 
     try:
-        with open(DATA_PATH, newline="", encoding="utf-8") as f:
+        with open(active_path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
             # Skip header
             header = next(reader, None)
@@ -43,19 +59,26 @@ def stream_domains() -> Generator[str, None, None]:
 def load_ranked_domains(limit: int = 1000000):
     """
     Loads a limited subset of top domains for memory-sensitive indexes (like Trie).
-    Defaults to top 1M.
+    Always includes the verified SAFETY_WHITELIST baseline so search indexes are never empty.
     """
     global _RANKED_DOMAINS_CACHE
     if _RANKED_DOMAINS_CACHE:
         return _RANKED_DOMAINS_CACHE
 
     logger.info(f"Loading top {limit} domains for search indexing...")
-    count = 0
+    seen = set()
+    for d in SAFETY_WHITELIST:
+        _RANKED_DOMAINS_CACHE.append(d)
+        seen.add(d)
+
+    count = len(_RANKED_DOMAINS_CACHE)
     for domain in stream_domains():
-        _RANKED_DOMAINS_CACHE.append(domain)
-        count += 1
-        if count >= limit:
-            break
+        if domain not in seen:
+            _RANKED_DOMAINS_CACHE.append(domain)
+            seen.add(domain)
+            count += 1
+            if count >= limit:
+                break
             
     logger.info(f"Prioritized search index loaded: {len(_RANKED_DOMAINS_CACHE)} domains.")
     return _RANKED_DOMAINS_CACHE
@@ -122,4 +145,13 @@ SAFETY_WHITELIST = frozenset([
     # Other important
     "kellybluebook.com", "ign.com", "gamespot.com", "techcrunch.com",
     "theverge.com", "wired.com", "arstechnica.com",
+    # MENA & Arab Regional Government, Banking & Telecom Platforms
+    "alrajhibank.com.sa", "alrajhi.bank", "alahli.com", "alahlionline.com",
+    "snb.com.sa", "riyadbank.com", "alinma.com", "bankalbilad.com", "anb.com.sa",
+    "stcpay.com.sa", "urpay.com.sa", "cibeg.com", "banquemisr.com", "nbe.com.eg",
+    "instapay.eg", "qnb.com", "adcb.com", "bankfab.com",
+    "absher.sa", "nafath.sa", "iam.gov.sa", "tawakkalna.sa", "tawakkalna.sdaia.gov.sa",
+    "qiwa.sa", "muqeem.sa", "gosi.gov.sa", "zatca.gov.sa", "balady.gov.sa", "etimad.sa", "sehhaty.sa",
+    "stc.com.sa", "mobily.com.sa", "sa.zain.com", "vodafone.com.eg", "etisalat.ae",
+    "noon.com", "jarir.com", "hungerstation.com", "jahez.net", "talabat.com", "mrsool.co",
 ])

@@ -69,7 +69,38 @@ class ScanOrchestrator:
             guest_id=self.guest_id
         )
 
-        # ── 0. Priority Cache Check ──────────────────────────────────────
+        domain = extract_domain(url)
+        fqdn = urlparse(url).netloc
+        domains_to_check = [domain]
+        if fqdn and fqdn != domain:
+            domains_to_check.append(fqdn)
+
+        # ── 0. Strict Blacklist Priority Check (Blacklist ALWAYS overrides Cache) ──
+        active_blacklist = Blacklist.objects.filter(
+            domain__in=domains_to_check, is_active=True
+        ).filter(
+            models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=timezone.now())
+        ).first()
+
+        if active_blacklist:
+            logger.warning(f"[BLACKLIST] Instant block: {domain} is blacklisted (Active blacklist overrides any cache).")
+            # Invalidate any stale cache entries for this URL
+            ScanCache.objects.filter(url_hash=url_hash).delete()
+            all_sources = [{
+                'source_type': 'blacklist',
+                'verdict': 'malicious',
+                'risk_score': 100,
+                'weight': self.SOURCE_WEIGHTS['blacklist'],
+                'confidence': 1.0,
+                'raw_data': {
+                    'threat_type': active_blacklist.threat_type,
+                    'severity': active_blacklist.severity,
+                    'description': active_blacklist.description
+                }
+            }]
+            return self._finalize(scan_record, 100, 'malicious', all_sources)
+
+        # ── 1. Priority Cache Check (Only for non-blacklisted URLs) ─────────
         if not ignore_cache:
             cached = self._check_cache_priority(url, url_hash, scan_level)
             if cached:
@@ -91,7 +122,6 @@ class ScanOrchestrator:
         else:
             logger.info(f"[CACHE] Bypassing cache for URL: {url}")
 
-        domain = extract_domain(url)
         all_sources = []
         
         # ── Phase 1: Heuristics ─────────────────────────────────────────
@@ -196,7 +226,9 @@ class ScanOrchestrator:
         if fqdn and fqdn != domain:
             domains_to_check.append(fqdn)
             
-        if Blacklist.objects.filter(domain__in=domains_to_check, is_active=True).exists():
+        if Blacklist.objects.filter(domain__in=domains_to_check, is_active=True).filter(
+            models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=timezone.now())
+        ).exists():
             sources.append({
                 'source_type': 'blacklist',
                 'verdict': 'malicious',
@@ -404,22 +436,24 @@ class ScanOrchestrator:
         
         detector = ThreatDetector()
         vt_engine_result = detector.detect(url, scan_level='deep')
-        vt_result = vt_engine_result.get("data", {}) if isinstance(vt_engine_result, dict) else {}
+        vt_data = vt_engine_result.get("data") if isinstance(vt_engine_result, dict) and isinstance(vt_engine_result.get("data"), dict) else vt_engine_result
+        if not isinstance(vt_data, dict):
+            vt_data = {}
+
+        # Extract findings from the actual detection payload
+        vt_internal_score = vt_data.get('score', 100)
+        threats = vt_data.get('threats_found', [])
+        scan_failed = vt_data.get('scan_failed', False) or vt_engine_result.get("status") in ("error", "timeout")
+        is_inconclusive = vt_data.get('final_status') in ('غير محدد', 'غير مؤكد', 'فشل الفحص')
         
-        # Extract the actual malicious engine count from VT details
-        # VT's internal score: 100=safe, 45=suspicious, 10=malicious (inverted!)
-        vt_internal_score = vt_result.get('score', 100)
-        threats = vt_result.get('threats_found', [])
-        scan_failed = vt_result.get('scan_failed', False)
-        
-        # If scan failed, return low-confidence safe (we simply don't know)
-        if scan_failed or vt_engine_result.get("status") in ("error", "timeout"):
+        # If scan failed or inconclusive, return 'error' verdict so it doesn't dilute other threat findings
+        if scan_failed or is_inconclusive:
             return [{
                 'source_type': 'vt',
-                'verdict': 'safe',
+                'verdict': 'error',
                 'risk_score': 0,
                 'weight': self.SOURCE_WEIGHTS['vt'],
-                'confidence': 0.3,  # Very low: we couldn't check
+                'confidence': 0.0,  # Zero confidence: cannot be used for scoring
                 'latency_ms': vt_engine_result.get("latency_ms", 0.0),
                 'raw_data': vt_engine_result
             }]
@@ -439,7 +473,7 @@ class ScanOrchestrator:
         # Threats found: determine severity from actual VT data
         # Parse the malicious count from the detail strings
         malicious_count = 0
-        for detail in vt_result.get('details', []):
+        for detail in vt_data.get('details', []):
             if isinstance(detail, str) and 'محرك رصد' in detail:
                 # Extract number: "⚠️ VirusTotal: X محرك رصد تهديداً (Y)"
                 try:

@@ -48,8 +48,8 @@ class CreateReportView(APIView):
                 report.reporter_name = 'مستخدم مجهول'
             
             report.save()
-            print(f"✅ تم حفظ البلاغ برقم: {report.tracking_number}")
-            print(f"📊 حالة البلاغ: {report.status}")
+            logger.info("Report saved successfully with tracking: %s", report.tracking_number)
+            logger.debug("Report status: %s", report.status)
             
             return Response({
                 'success': True,
@@ -57,10 +57,10 @@ class CreateReportView(APIView):
                 'report': ReportSerializer(report).data
             }, status=status.HTTP_201_CREATED)
         
-        print("❌ أخطاء في البيانات:")
-        print(serializer.errors)
+        logger.warning("Report validation errors: %s", serializer.errors)
         return Response({
             'success': False,
+            'message': 'بيانات غير صالحة',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
 

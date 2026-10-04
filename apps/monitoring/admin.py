@@ -1,56 +1,62 @@
 # apps/monitoring/admin.py
+"""
+SafeClick Engine Health Monitoring Console — Django Unfold
+───────────────────────────────────────────────────────────
+Real-time inspection of detection latency, failure rates, and upstream API status.
+"""
 from django.contrib import admin
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
+from unfold.admin import ModelAdmin
+from unfold.decorators import display
 from .models import EngineHealthLog
 
 
 @admin.register(EngineHealthLog)
-class EngineHealthLogAdmin(admin.ModelAdmin):
-    list_display = ['engine_display', 'status_badge', 'latency_display',
-                    'error_short', 'checked_at']
-    list_filter = ['engine_name', 'status']
+class EngineHealthLogAdmin(ModelAdmin):
+    list_display = [
+        'engine_header',
+        'status_label',
+        'latency_display',
+        'error_short',
+        'checked_at_display',
+    ]
+    list_filter = ['engine_name', 'status', ('checked_at', admin.DateFieldListFilter)]
     search_fields = ['engine_name', 'error_message', 'scan_url']
     list_per_page = 50
     ordering = ['-checked_at']
+    list_filter_submit = True
+    list_fullwidth = True
 
-    def engine_display(self, obj):
-        return obj.get_engine_name_display()
-    engine_display.short_description = 'المحرك'
+    @display(description='المحرك الأمني', header=True)
+    def engine_header(self, obj):
+        latency = f"{int(obj.latency_ms)}ms" if obj.latency_ms is not None else "N/A"
+        return [obj.get_engine_name_display(), f"زمن الاستجابة: {latency}"]
 
-    def status_badge(self, obj):
-        colors = {
-            'ok': '#16a34a',
-            'degraded': '#f59e0b',
-            'error': '#dc2626',
-            'timeout': '#dc2626',
-            'skipped': '#6b7280',
-        }
-        icons = {
-            'ok': '✅', 'degraded': '⚠️', 'error': '❌',
-            'timeout': '⏱️', 'skipped': '⏭️',
-        }
-        color = colors.get(obj.status, '#6b7280')
-        icon = icons.get(obj.status, '❓')
-        return format_html(
-            '<span style="background:{};color:#fff;padding:3px 8px;'
-            'border-radius:10px;">{} {}</span>',
-            color, icon, obj.get_status_display())
-    status_badge.short_description = 'الحالة'
+    @display(description='الحالة التشغيلية', label={
+        'ok': 'success',
+        'degraded': 'warning',
+        'error': 'danger',
+        'timeout': 'danger',
+        'skipped': 'info',
+    })
+    def status_label(self, obj):
+        return obj.status
 
+    @display(description='زمن الاستجابة')
     def latency_display(self, obj):
-        if obj.latency_ms < 100:
-            color = 'green'
-        elif obj.latency_ms < 1000:
-            color = 'orange'
-        else:
-            color = 'red'
-        return format_html(
-            '<span style="color:{};">{}ms</span>',
-            color, int(obj.latency_ms) if obj.latency_ms is not None else 0)
-    latency_display.short_description = 'الاستجابة'
+        if obj.latency_ms is None:
+            return '—'
+        ms = int(obj.latency_ms)
+        color = 'text-green-600 dark:text-green-400' if ms < 200 else 'text-orange-600 dark:text-orange-400' if ms < 1000 else 'text-red-600 dark:text-red-400 font-bold'
+        return format_html('<span class="font-mono {}">{}ms</span>', color, ms)
 
+    @display(description='رسالة الخطأ')
     def error_short(self, obj):
         if not obj.error_message:
-            return '—'
-        return obj.error_message[:80] + '...' if len(obj.error_message) > 80 else obj.error_message
-    error_short.short_description = 'الخطأ'
+            return mark_safe('<span class="text-base-400">—</span>')
+        return format_html('<span class="text-red-600 dark:text-red-400 font-mono text-xs">{}</span>', obj.error_message[:75])
+
+    @display(description='تاريخ الفحص')
+    def checked_at_display(self, obj):
+        return obj.checked_at.strftime('%Y-%m-%d %H:%M:%S')

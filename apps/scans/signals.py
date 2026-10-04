@@ -61,19 +61,34 @@ def update_user_counters(sender, instance, created, **kwargs):
 @receiver(post_save, sender='scans.Blacklist')
 def sync_blacklist_to_domain_on_save(sender, instance, **kwargs):
     """
-    When a Blacklist entry is created/updated, sync Domain.is_blacklisted.
-    Handles both domain_ref FK and domain CharField lookups.
+    When a Blacklist entry is created/updated, sync Domain.is_blacklisted
+    and invalidate any cached scan results for this domain.
     """
     _sync_domain_blacklist_flag(instance)
+    _invalidate_scan_cache_for_domain(instance.domain)
 
 
 @receiver(post_delete, sender='scans.Blacklist')
 def sync_blacklist_to_domain_on_delete(sender, instance, **kwargs):
     """
     When a Blacklist entry is deleted, recheck if the domain
-    still has any active blacklist entries.
+    still has any active blacklist entries, and invalidate stale cache.
     """
     _sync_domain_blacklist_flag(instance, deleted=True)
+    _invalidate_scan_cache_for_domain(instance.domain)
+
+
+def _invalidate_scan_cache_for_domain(domain_name: str):
+    """Invalidates all ScanCache entries containing the specified domain."""
+    if not domain_name:
+        return
+    try:
+        from apps.scans.models import ScanCache
+        deleted_count, _ = ScanCache.objects.filter(url__icontains=domain_name).delete()
+        if deleted_count > 0:
+            logger.info("[SIGNAL] Invalidated %d ScanCache entries for domain %s", deleted_count, domain_name)
+    except Exception as e:
+        logger.warning("[SIGNAL] Failed to invalidate ScanCache for domain %s: %s", domain_name, e)
 
 
 def _sync_domain_blacklist_flag(blacklist_entry, deleted=False):

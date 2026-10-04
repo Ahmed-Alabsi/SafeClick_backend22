@@ -1,19 +1,26 @@
 # apps/domains/admin.py
 """
-Domain Intelligence Admin Dashboard — Production-Grade
-──────────────────────────────────────────────────────
-Full CRUD, filtering, search, and visual badges for domain intelligence.
+SafeClick Domain & Brand Intelligence Admin Console — Django Unfold
+───────────────────────────────────────────────────────────────────
+High-performance brand protection, domain telemetry, verified catalogs,
+and instant cache synchronization.
 """
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Domain, DomainIntel
+from django.utils.safestring import mark_safe
+from unfold.admin import ModelAdmin, TabularInline
+from unfold.decorators import display, action
+from .models import Domain, DomainIntel, Brand, BrandDomain, BrandKeyword
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Domain Admin
+# ══════════════════════════════════════════════════════════════════════════════
 
 @admin.register(Domain)
-class DomainAdmin(admin.ModelAdmin):
+class DomainAdmin(ModelAdmin):
     list_display = [
-        'domain_display', 'status_badge', 'age_display', 'ssl_badge',
-        'dns_badge', 'scan_stats', 'threat_ratio_bar', 'last_checked',
+        'domain_header', 'status_label', 'age_display', 'scan_stats', 'last_checked',
     ]
     list_filter = [
         'is_blacklisted', 'is_whitelisted', 'has_ssl',
@@ -26,153 +33,139 @@ class DomainAdmin(admin.ModelAdmin):
     ordering = ['-last_checked']
     date_hierarchy = 'created_at'
     readonly_fields = ['id', 'created_at', 'last_checked', 'threat_ratio']
+    list_filter_submit = True
+    list_fullwidth = True
 
     fieldsets = (
-        ('معلومات الدومين', {
+        ('معلومات النطاق الأساسية', {
             'fields': ('domain', 'is_whitelisted', 'is_blacklisted'),
         }),
-        ('بيانات التسجيل (WHOIS/RDAP)', {
+        ('بيانات التسجيل (WHOIS / RDAP)', {
             'fields': ('registrar', 'registration_date', 'expiration_date',
                        'age_days', 'whois_country'),
-            'description': 'يتم تعبئتها تلقائياً من نتائج الفحص',
+            'description': 'يتم استخراجها وتحديثها تلقائياً أثناء دورة الفحص الاستباقي',
         }),
-        ('SSL/TLS', {
+        ('شهادة الأمان المشفرة (SSL / TLS)', {
             'fields': ('has_ssl', 'ssl_issuer', 'ssl_is_self_signed',
                        'ssl_is_expired', 'ssl_expiry_days', 'ssl_protocol'),
         }),
-        ('DNS', {
+        ('إعدادات خوادم الأسماء (DNS Telemetry)', {
             'fields': ('dns_resolves', 'dns_has_mx', 'dns_has_ns',
                        'dns_abnormal_config', 'dns_records'),
         }),
-        ('إحصائيات الفحص', {
+        ('إحصائيات الفحص ومعدل الخطر', {
             'fields': ('total_scans', 'threat_detections', 'threat_ratio'),
-            'description': 'يتم تحديثها تلقائياً بعد كل فحص',
+            'description': 'مؤشرات تراكمية للتهديدات المرصودة على هذا النطاق',
         }),
-        ('التواريخ', {
+        ('سجلات التوقيت', {
             'fields': ('created_at', 'last_checked'),
+            'classes': ('collapse',),
         }),
     )
 
     actions = ['mark_whitelisted', 'mark_blacklisted', 'clear_status', 'reset_stats']
 
-    def domain_display(self, obj):
-        return format_html(
-            '<span style="font-family:monospace;font-weight:bold;'
-            'font-size:1.05em;">{}</span>', obj.domain)
-    domain_display.short_description = 'الدومين'
+    @display(description='النطاق', header=True)
+    def domain_header(self, obj):
+        sub = f"سجل بواسطة: {obj.registrar}" if obj.registrar else "غير مسجل"
+        return [obj.domain, sub]
 
-    def status_badge(self, obj):
+    @display(description='التصنيف الأمني', label={
+        'محظور': 'danger',
+        'موثوق': 'success',
+        'غير مصنف': 'info',
+    })
+    def status_label(self, obj):
         if obj.is_blacklisted:
-            return format_html(
-                '<span style="background:#dc2626;color:#fff;padding:3px 10px;'
-                'border-radius:12px;font-weight:bold;">🔴 محظور</span>')
+            return 'محظور'
         if obj.is_whitelisted:
-            return format_html(
-                '<span style="background:#16a34a;color:#fff;padding:3px 10px;'
-                'border-radius:12px;font-weight:bold;">🟢 موثوق</span>')
-        return format_html(
-            '<span style="background:#374151;color:#e5e7eb;padding:3px 10px;'
-            'border-radius:12px;">⚪ غير مصنف</span>')
-    status_badge.short_description = 'الحالة'
+            return 'موثوق'
+        return 'غير مصنف'
 
+    @display(description='عمر النطاق')
     def age_display(self, obj):
         if obj.age_days is None:
             return '—'
         if obj.age_days < 30:
-            return format_html(
-                '<span style="color:#dc2626;font-weight:bold;">{} يوم ⚠️</span>',
-                obj.age_days)
+            return format_html('<span class="text-red-600 dark:text-red-400 font-semibold font-mono">{} يوم (حديث)</span>', obj.age_days)
         if obj.age_days < 365:
-            return format_html(
-                '<span style="color:#f59e0b;">{} يوم</span>', obj.age_days)
+            return format_html('<span class="text-orange-600 dark:text-orange-400 font-mono">{} يوم</span>', obj.age_days)
         years = obj.age_days // 365
-        return format_html(
-            '<span style="color:#16a34a;">{} سنة</span>', years)
-    age_display.short_description = 'العمر'
+        return format_html('<span class="text-green-600 dark:text-green-400 font-mono">{} سنة</span>', years)
 
-    def ssl_badge(self, obj):
+    @display(description='حالة SSL', label={
+        'صالح': 'success',
+        'مفقود': 'danger',
+        'منتهي': 'danger',
+        'ذاتي': 'warning',
+    })
+    def ssl_status(self, obj):
         if not obj.has_ssl:
-            return format_html('<span style="color:#dc2626;">❌ لا يوجد</span>')
+            return 'مفقود'
         if obj.ssl_is_expired:
-            return format_html('<span style="color:#dc2626;font-weight:bold;">⚠️ منتهي</span>')
+            return 'منتهي'
         if obj.ssl_is_self_signed:
-            return format_html('<span style="color:#f59e0b;">⚠️ ذاتي</span>')
-        issuer = obj.ssl_issuer or ''
-        short_issuer = issuer[:15] + '…' if len(issuer) > 15 else issuer
-        return format_html(
-            '<span style="color:#16a34a;">✅ {}</span>',
-            short_issuer or 'صالح')
-    ssl_badge.short_description = 'SSL'
+            return 'ذاتي'
+        return 'صالح'
 
-    def dns_badge(self, obj):
+    @display(description='خوادم DNS', label={
+        'متصل': 'success',
+        'لا يستجيب': 'danger',
+        'شاذ': 'warning',
+    })
+    def dns_status(self, obj):
         if not obj.dns_resolves:
-            return format_html('<span style="color:#dc2626;">❌ لا يستجيب</span>')
+            return 'لا يستجيب'
         if obj.dns_abnormal_config:
-            return format_html('<span style="color:#f59e0b;">⚠️ غير طبيعي</span>')
-        parts = []
-        if obj.dns_has_mx:
-            parts.append('MX')
-        if obj.dns_has_ns:
-            parts.append('NS')
-        info = ', '.join(parts) if parts else 'OK'
-        return format_html(
-            '<span style="color:#16a34a;">✅ {}</span>', info)
-    dns_badge.short_description = 'DNS'
+            return 'شاذ'
+        return 'متصل'
 
+    @display(description='الفحوصات')
     def scan_stats(self, obj):
         total = obj.total_scans or 0
         if total == 0:
             return '—'
         threats = obj.threat_detections or 0
-        return format_html(
-            '<span>{} فحص ({} تهديد)</span>', total, threats)
-    scan_stats.short_description = 'الفحوصات'
+        return format_html('<span class="font-mono text-xs">{} فحص ({} تهديد)</span>', total, threats)
 
-    def threat_ratio_bar(self, obj):
+    @display(description='معدل الخطر')
+    def threat_ratio_display(self, obj):
         ratio = (obj.threat_ratio or 0) * 100
         if ratio == 0 and (obj.total_scans or 0) == 0:
             return '—'
-        if ratio < 10:
-            color = '#16a34a'
-        elif ratio < 50:
-            color = '#f59e0b'
-        else:
-            color = '#dc2626'
-        return format_html(
-            '<div style="background:#e5e7eb;border-radius:4px;width:80px;height:14px;">'
-            '<div style="background:{};width:{}%;height:100%;border-radius:4px;'
-            'min-width:2px;"></div></div> <small style="color:{};">{}%</small>',
-            color, min(ratio, 100), color, int(ratio))
-    threat_ratio_bar.short_description = 'نسبة الخطر'
+        color = 'text-green-600 dark:text-green-400' if ratio < 10 else 'text-orange-600 dark:text-orange-400' if ratio < 50 else 'text-red-600 dark:text-red-400 font-bold'
+        return format_html('<span class="font-mono {}">{}%</span>', color, int(ratio))
 
-    # ── Admin Actions ────────────────────────────────────────────────────
-
-    @admin.action(description='✅ تحديد كموثوق (Whitelist)')
+    @action(description='تحديد كموثوق (Whitelist)', icon='verified')
     def mark_whitelisted(self, request, queryset):
         count = queryset.update(is_whitelisted=True, is_blacklisted=False)
-        self.message_user(request, f'تم تحديد {count} دومين كموثوق.')
+        self.message_user(request, f'تم تحديد {count} نطاق كموثوق.')
 
-    @admin.action(description='🔴 تحديد كمحظور (Blacklist)')
+    @action(description='تحديد كمحظور (Blacklist)', icon='block')
     def mark_blacklisted(self, request, queryset):
         count = queryset.update(is_blacklisted=True, is_whitelisted=False)
-        self.message_user(request, f'تم تحديد {count} دومين كمحظور.')
+        self.message_user(request, f'تم تحديد {count} نطاق كمحظور.')
 
-    @admin.action(description='⚪ إزالة التصنيف')
+    @action(description='إزالة التصنيف', icon='restart_alt')
     def clear_status(self, request, queryset):
         count = queryset.update(is_whitelisted=False, is_blacklisted=False)
-        self.message_user(request, f'تم إزالة تصنيف {count} دومين.')
+        self.message_user(request, f'تم إزالة تصنيف {count} نطاق.')
 
-    @admin.action(description='🔄 إعادة تعيين الإحصائيات')
+    @action(description='🔄 إعادة تعيين الإحصائيات', icon='refresh')
     def reset_stats(self, request, queryset):
         count = queryset.update(total_scans=0, threat_detections=0, threat_ratio=0.0)
-        self.message_user(request, f'تم إعادة تعيين إحصائيات {count} دومين.')
+        self.message_user(request, f'تم إعادة تعيين إحصائيات {count} نطاق.')
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Domain Intel Admin
+# ══════════════════════════════════════════════════════════════════════════════
 
 @admin.register(DomainIntel)
-class DomainIntelAdmin(admin.ModelAdmin):
+class DomainIntelAdmin(ModelAdmin):
     list_display = [
-        'domain_name', 'intel_source_badge', 'threat_type_badge',
-        'severity_badge', 'first_seen', 'last_seen',
+        'domain_name', 'intel_source', 'threat_label',
+        'severity_label', 'first_seen', 'last_seen',
     ]
     list_filter = [
         'intel_source', 'severity', 'threat_type',
@@ -181,32 +174,200 @@ class DomainIntelAdmin(admin.ModelAdmin):
     search_fields = ['domain__domain', 'intel_source', 'threat_type']
     list_per_page = 30
     list_select_related = ['domain']
+    list_filter_submit = True
+    list_fullwidth = True
 
+    @display(description='النطاق', header=True)
     def domain_name(self, obj):
-        return obj.domain.domain if obj.domain else '—'
-    domain_name.short_description = 'الدومين'
+        name = obj.domain.domain if obj.domain else '—'
+        return [name, f"المصدر: {obj.intel_source}"]
 
-    def intel_source_badge(self, obj):
-        return format_html(
-            '<span style="background:#374151;color:#e5e7eb;padding:2px 6px;'
-            'border-radius:4px;">{}</span>', obj.intel_source)
-    intel_source_badge.short_description = 'المصدر'
+    @display(description='نوع التهديد', label={
+        'phishing': 'danger',
+        'malware': 'danger',
+        'scam': 'warning',
+        'spam': 'info',
+    })
+    def threat_label(self, obj):
+        return obj.threat_type
 
-    def threat_type_badge(self, obj):
-        colors = {
-            'phishing': '#dc2626', 'malware': '#7c3aed',
-            'scam': '#ea580c', 'spam': '#f59e0b',
-        }
-        color = colors.get(obj.threat_type, '#6b7280')
-        return format_html(
-            '<span style="color:{};font-weight:bold;">{}</span>',
-            color, obj.threat_type)
-    threat_type_badge.short_description = 'نوع التهديد'
+    @display(description='مستوى الخطورة', label={
+        'critical': 'danger',
+        'high': 'danger',
+        'medium': 'warning',
+        'low': 'info',
+    })
+    def severity_label(self, obj):
+        return obj.severity
 
-    def severity_badge(self, obj):
-        colors = {'low': '#6b7280', 'medium': '#f59e0b', 'high': '#ea580c', 'critical': '#dc2626'}
-        color = colors.get(obj.severity, '#6b7280')
-        return format_html(
-            '<span style="color:{};font-weight:bold;">{}</span>',
-            color, obj.severity)
-    severity_badge.short_description = 'الخطورة'
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Brand Intelligence Catalog Admin
+# ══════════════════════════════════════════════════════════════════════════════
+
+class BrandDomainInline(TabularInline):
+    model = BrandDomain
+    extra = 1
+    fields = ['domain', 'is_primary', 'status', 'verification_source', 'is_active']
+
+
+class BrandKeywordInline(TabularInline):
+    model = BrandKeyword
+    extra = 1
+    fields = ['keyword', 'match_strategy', 'weight', 'is_active']
+
+
+@admin.register(Brand)
+class BrandAdmin(ModelAdmin):
+    list_display = [
+        'brand_header', 'slug', 'sector_label', 'country', 'risk_label',
+        'verified_domains_count', 'keywords_count', 'is_active',
+    ]
+    list_filter = ['sector', 'country', 'risk_weight', 'is_active']
+    search_fields = ['name', 'name_ar', 'slug', 'domains__domain', 'keywords__keyword']
+    list_per_page = 30
+    inlines = [BrandDomainInline, BrandKeywordInline]
+    actions = ['activate_brands', 'deactivate_brands', 'bump_catalog_cache']
+    actions_list = ['bump_catalog_cache']
+    list_filter_submit = True
+    list_fullwidth = True
+
+    @display(description='العلامة التجارية / الجهة', header=True)
+    def brand_header(self, obj):
+        return [obj.name, obj.name_ar or '']
+
+    @display(description='القطاع', label={
+        'banking': 'success',
+        'fintech': 'info',
+        'government': 'primary',
+        'telecom': 'warning',
+        'ecommerce': 'warning',
+        'tech': 'info',
+    })
+    def sector_label(self, obj):
+        return obj.sector
+
+    @display(description='حساسية التهديد', label={
+        'CRITICAL': 'danger',
+        'HIGH': 'warning',
+        'MEDIUM': 'info',
+    })
+    def risk_label(self, obj):
+        return obj.risk_weight
+
+    @display(description='النطاقات المعتمدة')
+    def verified_domains_count(self, obj):
+        count = obj.domains.filter(status='VERIFIED', is_active=True).count()
+        return format_html('<span class="text-green-600 dark:text-green-400 font-semibold font-mono">{} نطاق</span>', count)
+
+    @display(description='الكلمات المفتاحية')
+    def keywords_count(self, obj):
+        count = obj.keywords.filter(is_active=True).count()
+        return format_html('<span class="font-mono text-base-400">{} كلمة</span>', count)
+
+    @action(description="تفعيل العلامات المحددة", icon='check_circle')
+    def activate_brands(self, request, queryset):
+        queryset.update(is_active=True)
+        from .services.brand_service import BrandService
+        BrandService.bump_version()
+        self.message_user(request, "تم تفعيل العلامات المحددة وتحديث الكاش.")
+
+    @action(description="تعطيل العلامات المحددة", icon='cancel')
+    def deactivate_brands(self, request, queryset):
+        queryset.update(is_active=False)
+        from .services.brand_service import BrandService
+        BrandService.bump_version()
+        self.message_user(request, "تم تعطيل العلامات المحددة وتحديث الكاش.")
+
+    @action(description="⚡ تحديث كاش محركات الفحص فورياً (Sync Catalog Cache)", icon='sync')
+    def bump_catalog_cache(self, request, queryset=None):
+        from .services.brand_service import BrandService
+        new_v = BrandService.bump_version()
+        self.message_user(request, f"تم تحديث نسخة الكتالوج بنجاح إلى v{new_v}. جميع محركات الفحص تم تحديثها فورياً.")
+
+
+@admin.register(BrandDomain)
+class BrandDomainAdmin(ModelAdmin):
+    list_display = ['domain_header', 'brand', 'status_label', 'is_primary', 'verification_source', 'is_active']
+    list_filter = ['status', 'is_primary', 'is_active', 'brand__sector']
+    search_fields = ['domain', 'brand__name', 'brand__slug']
+    list_per_page = 30
+    actions = ['mark_verified', 'mark_pending', 'mark_deprecated', 'activate_domains', 'deactivate_domains']
+    list_filter_submit = True
+    list_fullwidth = True
+
+    @display(description='النطاق الرسمي', header=True)
+    def domain_header(self, obj):
+        primary_text = "⭐ نطاق أساسي" if obj.is_primary else "نطاق معتمد"
+        return [obj.domain, primary_text]
+
+    @display(description='حالة الاعتماد', label={
+        'VERIFIED': 'success',
+        'PENDING': 'warning',
+        'DEPRECATED': 'danger',
+    })
+    def status_label(self, obj):
+        return obj.status
+
+    @action(description="✅ اعتماد رسمي (VERIFIED)", icon='verified')
+    def mark_verified(self, request, queryset):
+        from django.utils import timezone
+        count = queryset.update(status='VERIFIED', verified_at=timezone.now(), is_active=True)
+        from .services.brand_service import BrandService
+        BrandService.bump_version()
+        self.message_user(request, f"تم اعتماد {count} نطاق رسمياً وتحديث كاش المحركات.")
+
+    @action(description="⚠️ تعليق النطاقات (PENDING)", icon='pending')
+    def mark_pending(self, request, queryset):
+        count = queryset.update(status='PENDING')
+        from .services.brand_service import BrandService
+        BrandService.bump_version()
+        self.message_user(request, f"تم تحويل {count} نطاق إلى قيد التحقق.")
+
+    @action(description="🔴 إيقاف الاعتماد (DEPRECATED)", icon='block')
+    def mark_deprecated(self, request, queryset):
+        count = queryset.update(status='DEPRECATED')
+        from .services.brand_service import BrandService
+        BrandService.bump_version()
+        self.message_user(request, f"تم إيقاف {count} نطاق وإزالته من القائمة البيضاء السريعة.")
+
+    @action(description="تفعيل النطاقات المحددة", icon='check')
+    def activate_domains(self, request, queryset):
+        count = queryset.update(is_active=True)
+        from .services.brand_service import BrandService
+        BrandService.bump_version()
+        self.message_user(request, f"تم تفعيل {count} نطاق.")
+
+    @action(description="تعطيل النطاقات المحددة", icon='close')
+    def deactivate_domains(self, request, queryset):
+        count = queryset.update(is_active=False)
+        from .services.brand_service import BrandService
+        BrandService.bump_version()
+        self.message_user(request, f"تم تعطيل {count} نطاق.")
+
+
+@admin.register(BrandKeyword)
+class BrandKeywordAdmin(ModelAdmin):
+    list_display = ['keyword_header', 'brand', 'strategy_label', 'weight_display', 'is_active']
+    list_filter = ['match_strategy', 'is_active', 'brand__sector']
+    search_fields = ['keyword', 'brand__name', 'brand__slug']
+    list_per_page = 40
+    list_filter_submit = True
+    list_fullwidth = True
+
+    @display(description='الكلمة المفتاحية', header=True)
+    def keyword_header(self, obj):
+        return [obj.keyword, f"العلامة: {obj.brand.name}"]
+
+    @display(description='استراتيجية المطابقة', label={
+        'TOKEN_BOUNDARY': 'primary',
+        'TYPO_SIMILARITY': 'info',
+        'CONTAINS': 'warning',
+        'EXACT': 'success',
+    })
+    def strategy_label(self, obj):
+        return obj.match_strategy
+
+    @display(description='وزن التأثير')
+    def weight_display(self, obj):
+        return format_html('<span class="font-mono font-bold text-orange-600 dark:text-orange-400">{}</span>', obj.weight)

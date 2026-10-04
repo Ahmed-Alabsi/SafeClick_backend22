@@ -124,12 +124,15 @@ class EngineHealthLogsView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        hours  = int(request.query_params.get('hours', 24))
+        hours_param = request.query_params.get('hours')
         engine = request.query_params.get('engine')
         status = request.query_params.get('status')
 
-        since = timezone.now() - timedelta(hours=hours)
-        qs = EngineHealthLog.objects.filter(checked_at__gte=since).order_by('-checked_at')
+        if hours_param:
+            since = timezone.now() - timedelta(hours=int(hours_param))
+            qs = EngineHealthLog.objects.filter(checked_at__gte=since).order_by('-checked_at')
+        else:
+            qs = EngineHealthLog.objects.all().order_by('-checked_at')
 
         if engine:
             qs = qs.filter(engine_name=engine)

@@ -14,10 +14,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.conf import settings
-from google.oauth2 import id_token
-from google.auth.transport import requests as google_requests
-from google.auth.transport import requests as google_requests
-
+import uuid
+from django.db import transaction
 from .models import User, EmailVerification, IPAttempt, GuestSession
 from .serializers import (
     UserSerializer, RegisterSerializer, LoginSerializer,
@@ -27,6 +25,14 @@ from .email_templates import EMAIL_VERIFICATION_TEMPLATE, PASSWORD_RESET_TEMPLAT
 
 from apps.scans.models import Scan
 from uuid import UUID
+
+# Google OAuth2 verification
+try:
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token
+    GOOGLE_AUTH_AVAILABLE = True
+except ImportError:
+    GOOGLE_AUTH_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +77,73 @@ class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
+            # If email verification is mandated, initiate OTP flow without creating unverified active user
+            if getattr(settings, 'REQUIRE_EMAIL_VERIFICATION', True):
+                email = serializer.validated_data['email']
+                name = serializer.validated_data['name']
+                password = serializer.validated_data['password']
+
+                now = timezone.now()
+                try:
+                    verification = EmailVerification.objects.get(email=email)
+                    if now - verification.last_request_at < timedelta(seconds=60):
+                        return Response({
+                            'success': False,
+                            'message': 'يرجى الانتظار 60 ثانية قبل طلب رمز جديد'
+                        }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+                    
+                    if now - verification.last_request_at < timedelta(minutes=10):
+                        if verification.request_count >= 3:
+                            return Response({
+                                'success': False,
+                                'message': 'لقد تجاوزت حد طلب الرموز، يرجى المحاولة بعد 10 دقائق'
+                            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+                        verification.request_count += 1
+                    else:
+                        verification.request_count = 1
+                    
+                    verification.last_request_at = now
+                    verification.purpose = 'register'
+                    verification.name = name
+                    verification.set_password(password)
+                except EmailVerification.DoesNotExist:
+                    verification = EmailVerification(
+                        email=email,
+                        name=name,
+                        purpose='register'
+                    )
+                    verification.set_password(password)
+
+                otp = ''.join([secrets.choice('0123456789') for _ in range(6)])
+                verification.set_otp(otp)
+                verification.otp_attempts = 0
+                verification.expires_at = now + timedelta(minutes=5)
+                verification.save()
+
+                logger.info("Register OTP sent: %s (IP: %s)", email, get_client_ip(request))
+                subject = 'التأكد من حسابك - SafeClick'
+                html_content = EMAIL_VERIFICATION_TEMPLATE.replace('{{OTP_CODE}}', otp)
+                
+                try:
+                    email_msg = EmailMessage(
+                        subject,
+                        html_content,
+                        None,
+                        [email]
+                    )
+                    email_msg.content_subtype = "html"
+                    email_msg.send(fail_silently=False)
+                except Exception as e:
+                    logger.error(f"Register email sending error: {e}")
+
+                return Response({
+                    'success': True,
+                    'message': 'verification_sent',
+                    'requires_verification': True,
+                    'email': email
+                }, status=status.HTTP_201_CREATED)
+
+            # Direct registration fallback only if email verification explicitly disabled
             user = serializer.save()
             refresh = RefreshToken.for_user(user)
             return Response({
@@ -132,13 +205,13 @@ class SendOTPView(APIView):
 
             # Secure OTP generation
             otp = ''.join([secrets.choice('0123456789') for _ in range(6)])
-            verification.otp = otp
+            verification.set_otp(otp)
             verification.otp_attempts = 0 # Reset attempts
             verification.expires_at = timezone.now() + timedelta(minutes=5)
             verification.save()
 
             # Logging
-            logger.info(f"OTP Requested: {email} (IP: {get_client_ip(request)})")
+            logger.info("OTP Requested: %s (IP: %s)", email, get_client_ip(request))
 
             subject = 'التأكد من حسابك - SafeClick'
             html_content = EMAIL_VERIFICATION_TEMPLATE.replace('{{OTP_CODE}}', otp)
@@ -174,7 +247,7 @@ class VerifyOTPView(APIView):
         
         # IP Rate limit: max 10 attempts in 10 minutes
         if ip_count > 10:
-            logger.warning(f"IP Rate limit exceeded: {ip}")
+            logger.warning("IP Rate limit exceeded: %s", ip)
             return Response({
                 'success': False,
                 'message': 'كثير من المحاولات من هذا الجهاز، يرجى الانتظار 10 دقائق'
@@ -204,19 +277,19 @@ class VerifyOTPView(APIView):
                     }, status=status.HTTP_400_BAD_REQUEST)
                     
                 # OTP check
-                if verification.otp != otp:
+                if not verification.check_otp(otp):
                     verification.otp_attempts += 1
                     if verification.otp_attempts >= 5:
                         verification.lockout_until = now + timedelta(minutes=15)
                         verification.save()
-                        logger.warning(f"Account locked: {email}")
+                        logger.warning("Account locked: %s", email)
                         return Response({
                             'success': False,
                             'message': 'تجاوزت حد المحاولات، تم حظر الحساب لمدة 15 دقيقة'
                         }, status=status.HTTP_403_FORBIDDEN)
                     
                     verification.save()
-                    logger.info(f"Failed OTP attempt: {email} (Attempt {verification.otp_attempts})")
+                    logger.info("Failed OTP attempt: %s (Attempt %s)", email, verification.otp_attempts)
                     return Response({
                         'success': False,
                         'message': f'الرمز غير صحيح (المتبقي {5 - verification.otp_attempts} محاولات)'
@@ -230,18 +303,18 @@ class VerifyOTPView(APIView):
                             'message': 'البريد الإلكتروني مسجل بالفعل'
                         }, status=status.HTTP_400_BAD_REQUEST)
                     
-                    user = User.objects.create_user(
-                        email=email,
-                        name=verification.name,
-                        password='' # Will set actual hash next
-                    )
-                    user.password = verification.password # This is already hashed
-                    user.is_email_verified = True
-                    user.save()
+                    with transaction.atomic():
+                        user = User(
+                            email=email,
+                            name=verification.name,
+                            password=verification.password,
+                            is_email_verified=True
+                        )
+                        user.save()
                     
                     refresh = RefreshToken.for_user(user)
                     
-                    logger.info(f"OTP Verified & Account Created: {email}")
+                    logger.info("OTP Verified & Account Created: %s", email)
                     verification.delete()
                     
                     merge_guest_scans(user, request)
@@ -294,7 +367,7 @@ class ResendOTPView(APIView):
                 
                 # Use secrets for secure OTP
                 otp = ''.join([secrets.choice('0123456789') for _ in range(6)])
-                verification.otp = otp
+                verification.set_otp(otp)
                 verification.otp_attempts = 0
                 verification.last_request_at = now
                 verification.expires_at = now + timedelta(minutes=5)
@@ -339,6 +412,15 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data['user']
+
+            # Enforce email verification check on login
+            if not user.is_email_verified and getattr(settings, 'REQUIRE_EMAIL_VERIFICATION', True):
+                return Response({
+                    'success': False,
+                    'message': 'يرجى تأكيد بريدك الإلكتروني قبل تسجيل الدخول.',
+                    'code': 'email_not_verified',
+                    'email': user.email
+                }, status=status.HTTP_403_FORBIDDEN)
             
             refresh = RefreshToken.for_user(user)
             
@@ -377,8 +459,15 @@ class ProfileView(APIView):
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
     def post(self, request):
-        # Simply return success, JWT is stateless or blacklisted on client
-        return Response({"success": True, "message": "Successfully logged out"}, status=status.HTTP_200_OK)
+        try:
+            refresh_token = request.data.get("refresh")
+            if refresh_token:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+            return Response({"success": True, "message": "Successfully logged out"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.warning("Logout token blacklist notice: %s", e)
+            return Response({"success": True, "message": "Successfully logged out"}, status=status.HTTP_200_OK)
 
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
@@ -398,7 +487,7 @@ class ForgotPasswordView(APIView):
             if not created and now - verification.last_request_at < timedelta(seconds=60):
                  return Response({'success': False, 'message': 'يرجى الانتظار دقيقة قبل طلب رمز استعادة جديد'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
             
-            verification.otp = otp
+            verification.set_otp(otp)
             verification.purpose = 'reset'
             verification.otp_attempts = 0
             verification.last_request_at = now
@@ -418,17 +507,27 @@ class ForgotPasswordView(APIView):
                 email_msg.content_subtype = "html"
                 email_msg.send(fail_silently=False)
             except Exception as e:
-                logger.error(f"Forgot password email error: {e}")
+                logger.error("Forgot password email error: %s", e)
             
             return Response({'success': True, 'message': 'verification_sent'})
             
         except User.DoesNotExist:
-            return Response({'success': False, 'message': 'البريد الإلكتروني غير مسجل'}, status=status.HTTP_404_NOT_FOUND)
+            logger.info("Forgot password requested for non-existent email: %s", email)
+            return Response({'success': True, 'message': 'verification_sent'}, status=status.HTTP_200_OK)
 
 class VerifyResetOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        ip = get_client_ip(request)
+        ip_count = track_ip_attempt(ip)
+        if ip_count > 10:
+            logger.warning("IP Rate limit exceeded for OTP reset verification: %s", ip)
+            return Response({
+                'success': False,
+                'message': 'كثير من المحاولات من هذا الجهاز، يرجى الانتظار 10 دقائق'
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         email = request.data.get('email')
         otp = request.data.get('otp')
 
@@ -439,13 +538,32 @@ class VerifyResetOTPView(APIView):
             verification = EmailVerification.objects.get(email=email, purpose='reset')
             now = timezone.now()
 
+            # Lockout check
+            if verification.lockout_until and now < verification.lockout_until:
+                return Response({
+                    'success': False,
+                    'message': 'تم حظر المحاولات مؤقتاً، يرجى المحاولة بعد 15 دقيقة'
+                }, status=status.HTTP_403_FORBIDDEN)
+
             if now > verification.expires_at:
                 return Response({'success': False, 'message': 'الرمز منتهي الصلاحية'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if verification.otp != otp:
+            if not verification.check_otp(otp):
                 verification.otp_attempts += 1
+                if verification.otp_attempts >= 5:
+                    verification.lockout_until = now + timedelta(minutes=15)
+                    verification.save()
+                    logger.warning("Reset password locked out: %s", email)
+                    return Response({
+                        'success': False,
+                        'message': 'تجاوزت حد المحاولات، تم حظر الحساب لمدة 15 دقيقة'
+                    }, status=status.HTTP_403_FORBIDDEN)
+
                 verification.save()
-                return Response({'success': False, 'message': 'الرمز غير صحيح'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({
+                    'success': False,
+                    'message': f'الرمز غير صحيح (المتبقي {5 - verification.otp_attempts} محاولات)'
+                }, status=status.HTTP_400_BAD_REQUEST)
 
             return Response({'success': True, 'message': 'otp_verified'})
             
@@ -456,6 +574,15 @@ class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        ip = get_client_ip(request)
+        ip_count = track_ip_attempt(ip)
+        if ip_count > 10:
+            logger.warning("IP Rate limit exceeded for ResetPasswordView: %s", ip)
+            return Response({
+                'success': False,
+                'message': 'كثير من المحاولات من هذا الجهاز، يرجى الانتظار 10 دقائق'
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         email = request.data.get('email')
         otp = request.data.get('otp')
         new_password = request.data.get('password')
@@ -467,15 +594,51 @@ class ResetPasswordView(APIView):
             verification = EmailVerification.objects.get(email=email, purpose='reset')
             now = timezone.now()
 
+            # Lockout check
+            if verification.lockout_until and now < verification.lockout_until:
+                return Response({
+                    'success': False,
+                    'message': 'تم حظر المحاولات مؤقتاً، يرجى المحاولة بعد 15 دقيقة'
+                }, status=status.HTTP_403_FORBIDDEN)
+
             if now > verification.expires_at:
                 return Response({'success': False, 'message': 'الرمز منتهي الصلاحية'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if verification.otp != otp:
+            if not verification.check_otp(otp):
                 verification.otp_attempts += 1
+                if verification.otp_attempts >= 5:
+                    verification.lockout_until = now + timedelta(minutes=15)
+                    verification.save()
+                    logger.warning("Reset password locked out: %s", email)
+                    return Response({
+                        'success': False,
+                        'message': 'تجاوزت حد المحاولات، تم حظر الحساب لمدة 15 دقيقة'
+                    }, status=status.HTTP_403_FORBIDDEN)
+
                 verification.save()
-                return Response({'success': False, 'message': 'الرمز غير صحيح'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({
+                    'success': False,
+                    'message': f'الرمز غير صحيح (المتبقي {5 - verification.otp_attempts} محاولات)'
+                }, status=status.HTTP_400_BAD_REQUEST)
 
             user = User.objects.get(email=email)
+
+            if len(new_password) < 8:
+                return Response({
+                    'success': False,
+                    'message': 'كلمة المرور يجب أن تكون 8 أحرف على الأقل'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            from django.contrib.auth.password_validation import validate_password
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            try:
+                validate_password(new_password, user=user)
+            except DjangoValidationError as e:
+                return Response({
+                    'success': False,
+                    'message': list(e.messages)
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             user.set_password(new_password)
             user.save()
             
@@ -489,6 +652,13 @@ class GoogleLoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        if not GOOGLE_AUTH_AVAILABLE:
+            logger.error("Google Auth libraries not installed")
+            return Response({
+                'success': False,
+                'message': 'خدمة تسجيل الدخول بجوجل غير متوفرة حالياً'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
         token = request.data.get('id_token')
         ip = get_client_ip(request)
         ip_count = track_ip_attempt(ip)
@@ -579,18 +749,21 @@ class GuestRegisterView(APIView):
         ip = get_client_ip(request)
         guest = GuestSession.objects.create(ip_address=ip)
         
-        # إنشاء JWT للزائر يحمل هويته
+        # إنشاء JWT للزائر يحمل هويته بمفتاح توقيع منفصل
         payload = {
             'guest_id': str(guest.id),
-            'exp': timezone.now() + timedelta(days=7),
+            'jti': str(uuid.uuid4()),
+            'exp': timezone.now() + timedelta(hours=getattr(settings, 'GUEST_JWT_TTL_HOURS', 48)),
             'iat': timezone.now(),
             'is_guest': True,
-            'type': 'guest_access'
+            'type': 'guest_access',
+            'iss': 'safeclick-backend',
+            'aud': 'safeclick-client',
         }
+        guest_secret = getattr(settings, 'GUEST_JWT_SECRET', settings.SECRET_KEY + '-guest-ns')
+        token = jwt.encode(payload, guest_secret, algorithm='HS256')
         
-        token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
-        
-        logger.info(f"[AUTH] جلسة زائر جديدة: {guest.id} (IP: {ip})")
+        logger.info("[AUTH] جلسة زائر جديدة: %s (IP: %s)", guest.id, ip)
         
         return Response({
             'success': True,

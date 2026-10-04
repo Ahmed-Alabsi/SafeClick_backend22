@@ -18,7 +18,15 @@ _lock = threading.Lock()
 def build_trie():
     """Initializes a Trie with Top 1M legitimate domains for efficient search."""
     logger.info("Building Trie Index for candidate generation...")
-    domains = load_ranked_domains(limit=1000000)
+    domains = list(load_ranked_domains(limit=1000000))
+    try:
+        from apps.domains.services.brand_service import BrandService
+        cat = BrandService.get_catalog()
+        for d in cat.get("official_domains", set()):
+            if d not in domains:
+                domains.append(d)
+    except Exception:
+        pass
     return marisa_trie.Trie(domains)
 
 def get_trie():

@@ -79,6 +79,12 @@ TRUST_HIERARCHY = {
     "wordpress.com": "MEDIUM",
     # Education / Government
     "edu": "MEDIUM", "gov": "MEDIUM", "mil": "MEDIUM",
+    # Authoritative Regional Namespaces (Namespace Trust Signals)
+    "gov.sa": "HIGH", "edu.sa": "HIGH", "med.sa": "HIGH",
+    "gov.eg": "HIGH", "edu.eg": "HIGH",
+    "gov.ae": "HIGH", "ac.ae": "HIGH",
+    "bank": "HIGH",
+
     # Other major
     "adobe.com": "HIGH", "dropbox.com": "HIGH", "notion.so": "HIGH",
     "figma.com": "HIGH", "canva.com": "HIGH", "medium.com": "HIGH",

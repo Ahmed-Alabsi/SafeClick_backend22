@@ -7,6 +7,11 @@ from dateutil import parser as date_parser
 from .rdap_client import get_rdap_data
 from .async_utils import run_cpu_bound
 
+try:
+    from django.core.cache import cache
+except Exception:
+    cache = None
+
 logger = logging.getLogger(__name__)
 
 # Lazy loaded semaphore to control WHOIS and RDAP concurrency
@@ -15,7 +20,8 @@ _domain_age_sem = None
 async def get_domain_age(domain: str) -> Dict[str, Any]:
     """
     Calculates the domain age in days based on RDAP data, with WHOIS fallback asynchronously.
-    Includes an intrinsic Semaphore (concurrency limit) to avoid provider blocking (Rate Limit Isolation).
+    Includes an intrinsic Semaphore (concurrency limit) to avoid provider blocking (Rate Limit Isolation),
+    and caches valid age data for 7 days in Redis.
     """
     if not domain:
         return {
@@ -23,6 +29,18 @@ async def get_domain_age(domain: str) -> Dict[str, Any]:
             "error": "No domain provided",
             "details": {"age_days": 0}
         }
+
+    domain_clean = domain.lower().strip()
+    cache_key = f"domain_age:{domain_clean}"
+
+    if cache:
+        try:
+            cached_res = cache.get(cache_key)
+            if cached_res:
+                logger.debug("Returning cached domain age for %s", domain_clean)
+                return cached_res
+        except Exception:
+            pass
 
     # BUG #5 FIX: Always initialize last_error before any try/except block.
     # Previously, if RDAP returned None without raising an exception,
@@ -109,7 +127,7 @@ async def get_domain_age(domain: str) -> Dict[str, Any]:
             now = datetime.now(timezone.utc)
             age_days = (now - creation_date).days
             
-            return {
+            res = {
                 "status": "ok",
                 "details": {
                     "age_days": max(0, age_days),
@@ -118,6 +136,12 @@ async def get_domain_age(domain: str) -> Dict[str, Any]:
                     "age_hidden": False
                 }
             }
+            if cache:
+                try:
+                    cache.set(cache_key, res, timeout=60 * 60 * 24 * 7)
+                except Exception:
+                    pass
+            return res
         except Exception as e:
             return {
                 "status": "error",

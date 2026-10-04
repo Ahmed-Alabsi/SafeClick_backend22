@@ -11,6 +11,10 @@ class UserSerializer(serializers.ModelSerializer):
             'scanned_links', 'detected_threats', 'accuracy_rate',
             'is_email_verified', 'created_at', 'last_login'
         ]
+        read_only_fields = [
+            'id', 'email', 'scanned_links', 'detected_threats', 
+            'accuracy_rate', 'is_email_verified', 'created_at', 'last_login'
+        ]
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -23,8 +27,8 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate(self, data):
         if data['password'] != data['password_confirm']:
             raise serializers.ValidationError("كلمة المرور غير متطابقة")
-        if len(data['password']) < 6:
-            raise serializers.ValidationError("كلمة المرور يجب أن تكون 6 أحرف على الأقل")
+        if len(data['password']) < 8:
+            raise serializers.ValidationError("كلمة المرور يجب أن تكون 8 أحرف على الأقل")
         return data
     
     def create(self, validated_data):
@@ -68,7 +72,7 @@ class LoginSerializer(serializers.Serializer):
                     raise serializers.ValidationError("البريد الإلكتروني أو كلمة المرور غير صحيحة")
                     
             except User.DoesNotExist:
-                raise serializers.ValidationError("البريد الإلكتروني غير صحيح")
+                raise serializers.ValidationError("البريد الإلكتروني أو كلمة المرور غير صحيحة")
         
         # إذا تم إدخال اسم المستخدم فقط
         elif username:
@@ -85,9 +89,9 @@ class LoginSerializer(serializers.Serializer):
                     raise serializers.ValidationError("اسم المستخدم أو كلمة المرور غير صحيحة")
                     
             except User.DoesNotExist:
-                raise serializers.ValidationError("اسم المستخدم غير صحيح")
+                raise serializers.ValidationError("اسم المستخدم أو كلمة المرور غير صحيحة")
 
-        raise serializers.ValidationError("اسم المستخدم أو البريد الإلكتروني غير صحيح")
+        raise serializers.ValidationError("اسم المستخدم أو البريد الإلكتروني أو كلمة المرور غير صحيحة")
 
 class SendOTPSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
@@ -98,8 +102,8 @@ class SendOTPSerializer(serializers.Serializer):
     def validate(self, data):
         if 'password_confirm' in data and data['password'] != data['password_confirm']:
             raise serializers.ValidationError("كلمة المرور غير متطابقة")
-        if len(data['password']) < 6:
-            raise serializers.ValidationError("كلمة المرور يجب أن تكون 6 أحرف على الأقل")
+        if len(data['password']) < 8:
+            raise serializers.ValidationError("كلمة المرور يجب أن تكون 8 أحرف على الأقل")
         if User.objects.filter(email=data['email']).exists():
             raise serializers.ValidationError("البريد الإلكتروني مستخدم بالفعل")
         # Also check if another user has the same name since we login by name now

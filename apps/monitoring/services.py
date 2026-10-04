@@ -87,7 +87,7 @@ _STATUS_DEGRADED = "degraded"
 def _resolve_status(engine_result: dict) -> str:
     """Map an engine result dict to an EngineHealthLog status string."""
     status = engine_result.get("status", "")
-    if status == "ok":
+    if status in ("ok", "safe", "malicious", "suspicious"):
         return _STATUS_OK
     if status == "skipped":
         return _STATUS_SKIPPED

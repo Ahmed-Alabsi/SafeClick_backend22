@@ -4,8 +4,11 @@ Django settings for safeclick project - النسخة النهائية المتك
 
 from pathlib import Path
 import os
+import sys
 from dotenv import load_dotenv
 from datetime import timedelta
+from django.urls import reverse_lazy
+from django.templatetags.static import static
 
 # Load environment variables
 load_dotenv()
@@ -14,23 +17,51 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ========== الأمان ==========
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-dev-key-change-in-production')
 DEBUG = os.getenv('DJANGO_DEBUG', 'True') == 'True'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-dev-key-change-in-production')
+IS_TESTING = 'test' in sys.argv or 'pytest' in sys.argv[0]
+
+# Production security assertion: Never run in production with default insecure key
+if not DEBUG and SECRET_KEY == 'django-insecure-dev-key-change-in-production':
+    raise ValueError("CRITICAL SECURITY ERROR: SECRET_KEY must be set to a strong unpredictable key in production!")
+
+# Production Safety Net: Crash immediately if critical secrets are missing
+if not DEBUG and not IS_TESTING:
+    _REQUIRED_SECRETS = ['SECRET_KEY', 'DB_PASSWORD', 'DB_HOST']
+    _missing = [s for s in _REQUIRED_SECRETS if not os.getenv(s)]
+    if _missing:
+        raise ValueError(
+            f"CRITICAL: Missing required environment variables for production: "
+            f"{', '.join(_missing)}. Refusing to start."
+        )
 
 # DEVELOPMENT: Allow all hosts so physical devices on the LAN can connect.
 # PRODUCTION: Set ALLOWED_HOSTS env var to your exact domain, e.g. 'safeclick.app'
-if DEBUG:
+if DEBUG or IS_TESTING:
     ALLOWED_HOSTS = ['*']
 else:
-    ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+    allowed = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
+    # Automatically trust Render domains
+    if '.onrender.com' not in allowed:
+        allowed.append('.onrender.com')
+    ALLOWED_HOSTS = allowed
 
 VIRUSTOTAL_API_KEY = os.getenv('VIRUSTOTAL_API_KEY', '')
 GOOGLE_SAFE_BROWSING_API_KEY = os.getenv('GOOGLE_SAFE_BROWSING_API_KEY', '')
+APP_ID = os.getenv('APP_ID', 'safeclick-flutter-client')
+APP_SECRET = os.getenv('APP_SECRET', '')
+
+# Guest JWT uses a SEPARATE signing key (defense in depth)
+GUEST_JWT_SECRET = os.getenv('GUEST_JWT_SECRET', SECRET_KEY + '-guest-ns')
+GUEST_JWT_TTL_HOURS = int(os.getenv('GUEST_JWT_TTL_HOURS', '48'))
 
 
 # ========== التطبيقات ==========
 INSTALLED_APPS = [
-    'jazzmin',  # Professional UI theme
+    'unfold',
+    'unfold.contrib.filters',
+    'unfold.contrib.forms',
+    'unfold.contrib.inlines',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -42,6 +73,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
+    'drf_spectacular',
 
     # Local apps
     'apps.accounts',
@@ -59,6 +92,7 @@ INSTALLED_APPS = [
 # ========== Middleware ==========
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # High performance static file serving
     'corsheaders.middleware.CorsMiddleware',
     'safeclick.middleware.AppAccessMiddleware',  # Phase 6: App-ID validation
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -74,7 +108,7 @@ ROOT_URLCONF = 'safeclick.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -90,21 +124,41 @@ TEMPLATES = [
 WSGI_APPLICATION = 'safeclick.wsgi.application'
 
 # ========== قاعدة البيانات ==========
-# الاعتماد حصراً على PostgreSQL 
-DATABASES = {
+if 'test' in sys.argv or 'pytest' in sys.argv[0]:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
+    }
+elif os.getenv('DATABASE_URL'):
+    import dj_database_url
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=os.getenv('DATABASE_URL'),
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
+    }
+elif os.getenv('USE_SQLITE', 'False').lower() in ('true', '1'):
+    # Fast testing fallback without external database
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+else:
+    # الاعتماد حصراً على PostgreSQL للبيئات الحية والتطويرية
+    DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME', 'safeclick_db'),
-        'USER': os.getenv('DB_USER', 'safeclick_user'),
-        'PASSWORD': os.getenv('DB_PASSWORD', '123456'),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
-        'CONN_MAX_AGE': 60,
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 
 # ========== التخزين المؤقت (Redis) ==========
-REDIS_URL = os.getenv('REDIS_URL', 'redis://:StrongPassword123!@127.0.0.1:6379/1')
+REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1')
 
 try:
     import django_redis
@@ -147,7 +201,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
         'OPTIONS': {
-            'min_length': 6,  # 6 أحرف للتطوير
+            'min_length': 8,  # NIST SP 800-63B standard minimum
         }
     },
     {
@@ -168,6 +222,7 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').exists() else []
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # ========== ملفات الوسائط ==========
 MEDIA_URL = '/media/'
@@ -211,7 +266,18 @@ REST_FRAMEWORK = {
         'scan': '10/minute',  # Phase 7: 10 scans/min per authenticated user
         'guest_scan': '3/day',  # Allow 3 scans per day for guests based on IP
     },
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DATETIME_FORMAT': '%Y-%m-%d %H:%M:%S',
+}
+
+# ========== OpenAPI / Swagger Settings ==========
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'SafeClick Threat Intelligence API',
+    'DESCRIPTION': 'Multi-Layer Phishing, Threat Detection & URL Security Intelligence API',
+    'VERSION': '2.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SCHEMA_PATH_PREFIX': r'/api/',
 }
 
 # ========== حدود الاستخدام ==========
@@ -221,8 +287,8 @@ DEFAULT_CHARSET = 'utf-8'
 
 # ========== JWT Settings ==========
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=30),      # 30 يوم بدلاً من ساعة
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=60),     # 60 يوم بدلاً من 7 أيام
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('JWT_ACCESS_TOKEN_MINUTES', '60'))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.getenv('JWT_REFRESH_TOKEN_DAYS', '14'))),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'ALGORITHM': 'HS256',
@@ -238,26 +304,33 @@ SIMPLE_JWT = {
 }
 
 # ========== CORS Settings ==========
-# SECURITY: CORS_ALLOW_ALL_ORIGINS=True is acceptable for local dev.
-# In production, set CORS_ALLOW_ALL_ORIGINS=False and add exact origins to CORS_ALLOWED_ORIGINS.
-CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'True') == 'True'
+# Default to permissive ONLY when DEBUG is explicitly True
+default_cors_allow_all = 'True' if DEBUG else 'False'
+CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', default_cors_allow_all) == 'True'
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
+
+default_allowed_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://192.168.8.122:3000",
-    "http://192.168.8.122:8000",
+    "http://192.168.1.102:3000",
+    "http://192.168.1.102:8000",
 ]
+env_cors_origins = [o.strip() for o in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if o.strip()]
+CORS_ALLOWED_ORIGINS = env_cors_origins if env_cors_origins else default_allowed_origins
 
 # ========== CSRF Settings ==========
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://192.168.8.122:3000",
-    "http://192.168.8.122:8000",
+    "http://192.168.1.102:3000",
+    "http://192.168.1.102:8000",
+    "https://*.onrender.com",
 ]
+env_csrf = [o.strip() for o in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()]
+if env_csrf:
+    CSRF_TRUSTED_ORIGINS.extend(env_csrf)
 
 # ========== API Keys ==========
 # Note: VIRUSTOTAL_API_KEY and GOOGLE_SAFE_BROWSING_API_KEY already defined above (line 27-28)
@@ -314,67 +387,216 @@ LOGGING = {
     },
 }
 
-# ========== Jazzmin Admin UI Settings ==========
-JAZZMIN_SETTINGS = {
-    "site_title": "SafeClick Admin",
-    "site_header": "SafeClick",
-    "site_brand": "SafeClick Dashboard",
-    "welcome_sign": "مركز إدارة SafeClick للتأمين الرقمي",
-    "copyright": "SafeClick Ltd",
-    "search_model": ["accounts.User", "scans.Scan"],
-    "show_ui_builder": False,
-    
-    "topmenu_links": [
-        {"name": "Home",  "url": "admin:index", "permissions": ["auth.view_user"]},
-        {"name": "Support", "url": "https://github.com/", "new_window": True},
-    ],
-    
-    # Sections to display and custom icons
-    "icons": {
-        "accounts.User": "fas fa-users",
-        "scans.Scan": "fas fa-shield-alt",
-        "scans.Blacklist": "fas fa-ban",
-        "reports.Report": "fas fa-flag",
-        "reports.ReportComment": "fas fa-comments",
-        "auth.Group": "fas fa-users-cog",
+# ========== Django Unfold Cybersecurity Console Settings ==========
+UNFOLD = {
+    "SITE_TITLE": "SafeClick Cyber Intelligence",
+    "SITE_HEADER": "SafeClick Security Console",
+    "SITE_SUBHEADER": "منظومة كشف التصيد واستخبارات العلامات التجارية والنطاقات",
+    "SITE_SYMBOL": "shield",
+    "SITE_URL": "/",
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": True,
+    "THEME": "light",
+    "ENVIRONMENT": "safeclick.admin_dashboard.environment_callback",
+    "DASHBOARD_CALLBACK": "safeclick.admin_dashboard.dashboard_callback",
+    "COLORS": {
+        "primary": {
+            "50": "#eff6ff",
+            "100": "#dbeafe",
+            "200": "#bfdbfe",
+            "300": "#93c5fd",
+            "400": "#60a5fa",
+            "500": "#3b82f6",
+            "600": "#2563eb",
+            "700": "#1d4ed8",
+            "800": "#1e40af",
+            "900": "#1e3a8a",
+            "950": "#172554",
+        },
+        "base": {
+            "50": "#f8fafc",
+            "100": "#f1f5f9",
+            "200": "#e2e8f0",
+            "300": "#cbd5e1",
+            "400": "#94a3b8",
+            "500": "#64748b",
+            "600": "#475569",
+            "700": "#334155",
+            "800": "#1e293b",
+            "900": "#0f172a",
+            "950": "#020617",
+        },
     },
-    
-    # Custom dashboard config
-    "default_icon_parents": "fas fa-chevron-circle-right",
-    "default_icon_children": "fas fa-circle",
-    "related_modal_active": False,
-    "custom_css": None,
-    "custom_js": None,
+    "STYLES": [
+        lambda request: static("admin/css/safeclick_theme.css") + "?v=2.2",
+    ],
+    "SIDEBAR": {
+        "show_search": False,
+        "show_all_applications": False,
+        "navigation": [
+            {
+                "title": "استخبارات العلامات والنطاقات",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "العلامات التجارية المحمية",
+                        "icon": "verified_user",
+                        "link": reverse_lazy("admin:domains_brand_changelist"),
+                    },
+                    {
+                        "title": "نطاقات العلامات الرسمية",
+                        "icon": "domain",
+                        "link": reverse_lazy("admin:domains_branddomain_changelist"),
+                    },
+                    {
+                        "title": "الكلمات المفتاحية الحساسة",
+                        "icon": "key",
+                        "link": reverse_lazy("admin:domains_brandkeyword_changelist"),
+                    },
+                    {
+                        "title": "سجل النطاقات المفحوصة",
+                        "icon": "language",
+                        "link": reverse_lazy("admin:domains_domain_changelist"),
+                    },
+                    {
+                        "title": "البيانات التقنية والاستخباراتية",
+                        "icon": "dns",
+                        "link": reverse_lazy("admin:domains_domainintel_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "محرك الفحص ومكافحة التهديدات",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "سجل الفحوصات الأمنية",
+                        "icon": "travel_explore",
+                        "link": reverse_lazy("admin:scans_scan_changelist"),
+                    },
+                    {
+                        "title": "نتائج محركات الفحص الخارجية",
+                        "icon": "analytics",
+                        "link": reverse_lazy("admin:scans_scansourceresult_changelist"),
+                    },
+                    {
+                        "title": "القائمة السوداء النشطة",
+                        "icon": "block",
+                        "link": reverse_lazy("admin:scans_blacklist_changelist"),
+                    },
+                    {
+                        "title": "القائمة البيضاء المعتمدة",
+                        "icon": "check_circle",
+                        "link": reverse_lazy("admin:scans_whitelistentry_changelist"),
+                    },
+                    {
+                        "title": "كاش الفحوصات السريعة",
+                        "icon": "cached",
+                        "link": reverse_lazy("admin:scans_scancache_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "مركز البلاغات وملاحظات المجتمع",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "بلاغات الروابط المشبوهة",
+                        "icon": "flag",
+                        "link": reverse_lazy("admin:reports_report_changelist"),
+                    },
+                    {
+                        "title": "تعليقات ومتابعة البلاغات",
+                        "icon": "forum",
+                        "link": reverse_lazy("admin:reports_reportcomment_changelist"),
+                    },
+                    {
+                        "title": "تقييمات وملاحظات التطبيق",
+                        "icon": "star",
+                        "link": reverse_lazy("admin:feedback_apprating_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "الذكاء الاصطناعي ومراقبة المحركات",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "نماذج الذكاء الاصطناعي",
+                        "icon": "psychology",
+                        "link": reverse_lazy("admin:ai_aimodelversion_changelist"),
+                    },
+                    {
+                        "title": "بيانات التدريب والتحقق",
+                        "icon": "database",
+                        "link": reverse_lazy("admin:ai_aitrainingdataset_changelist"),
+                    },
+                    {
+                        "title": "سجل تنبؤات النماذج",
+                        "icon": "batch_prediction",
+                        "link": reverse_lazy("admin:ai_aiprediction_changelist"),
+                    },
+                    {
+                        "title": "سجل صحة المحركات",
+                        "icon": "monitor_heart",
+                        "link": reverse_lazy("admin:monitoring_enginehealthlog_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "المستخدمون والأمان وجلسات الزوار",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "مستخدمو المنصة",
+                        "icon": "person",
+                        "link": reverse_lazy("admin:accounts_user_changelist"),
+                    },
+                    {
+                        "title": "جلسات الزوار وحصص الفحص",
+                        "icon": "badge",
+                        "link": reverse_lazy("admin:accounts_guestsession_changelist"),
+                    },
+                    {
+                        "title": "رموز التحقق وسجلات الأمان",
+                        "icon": "mark_email_read",
+                        "link": reverse_lazy("admin:accounts_emailverification_changelist"),
+                    },
+                    {
+                        "title": "سجلات عناوين IP المقيدة",
+                        "icon": "policy",
+                        "link": reverse_lazy("admin:accounts_ipattempt_changelist"),
+                    },
+                ],
+            },
+        ],
+    },
 }
 
-JAZZMIN_UI_TWEAKS = {
-    "navbar_small_text": False,
-    "footer_small_text": False,
-    "body_small_text": False,
-    "brand_small_text": False,
-    "brand_colour": "navbar-dark",
-    "accent": "accent-primary",
-    "navbar": "navbar-dark",
-    "no_navbar_border": False,
-    "navbar_fixed": True,
-    "layout_boxed": False,
-    "footer_fixed": False,
-    "sidebar_fixed": True,
-    "sidebar": "sidebar-dark-primary",
-    "sidebar_nav_small_text": False,
-    "sidebar_disable_expand": False,
-    "sidebar_nav_child_indent": True,
-    "sidebar_nav_compact_style": False,
-    "sidebar_nav_legacy_style": False,
-    "sidebar_nav_flat_style": False,
-    "theme": "darkly", # A modern dark theme that fits security apps
-    "default_theme_mode": "auto",
-    "button_classes": {
-        "primary": "btn-outline-primary",
-        "secondary": "btn-outline-secondary",
-        "info": "btn-info",
-        "warning": "btn-warning",
-        "danger": "btn-danger",
-        "success": "btn-success"
-    }
-}
+# ========== Security Configuration ==========
+# Safe threshold to prevent memory exhaustion DoS attacks
+DATA_UPLOAD_MAX_NUMBER_FIELDS = int(os.getenv('DATA_UPLOAD_MAX_NUMBER_FIELDS', '2000'))
+
+# ========== Production Security Headers & SSL Hardening ==========
+if not DEBUG and not IS_TESTING:
+    SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'True') == 'True'
+    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '31536000'))  # 1 year HSTS
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+else:
+    SECURE_SSL_REDIRECT = False
+
+# ========== Email Verification Policy ==========
+# Mandate email OTP verification before issuing active JWT tokens
+REQUIRE_EMAIL_VERIFICATION = os.getenv('REQUIRE_EMAIL_VERIFICATION', 'True') == 'True'

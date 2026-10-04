@@ -1,0 +1,106 @@
+# ==============================================================================
+# SafeClick Backend — Complete Production Orchestration (docker-compose.yml)
+# PostgreSQL 16 + Redis 7 + Django API (Gunicorn) + Nginx (Reverse Proxy)
+# ==============================================================================
+
+services:
+  # 1. PostgreSQL Database Service
+  db:
+    image: postgres:16-alpine
+    container_name: safeclick_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-safeclick_db}
+      POSTGRES_USER: ${DB_USER:-safeclick_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-salah}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - safeclick_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-safeclick_user} -d ${DB_NAME:-safeclick_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # 2. Redis (Queue & Cache Engine)
+  redis:
+    image: redis:7-alpine
+    container_name: safeclick_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - safeclick_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 3. Django API Service (Gunicorn Web Server)
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: safeclick_backend:latest
+    container_name: safeclick_api
+    restart: unless-stopped
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-safeclick_db}
+      - DB_USER=${DB_USER:-safeclick_user}
+      - DB_PASSWORD=${DB_PASSWORD:-salah}
+      - REDIS_URL=redis://redis:6379/1
+    volumes:
+      - .:/app
+      - static_data:/app/staticfiles
+      - media_data:/app/media
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - safeclick_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/admin/login/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # 4. Nginx (Edge Reverse Proxy & Static Caching)
+  nginx:
+    image: nginx:stable-alpine
+    container_name: safeclick_nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-8080}:80"
+      - "${NGINX_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - static_data:/app/staticfiles:ro
+      - media_data:/app/media:ro
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      - safeclick_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_data:
+  media_data:
+
+networks:
+  safeclick_net:
+    driver: bridge

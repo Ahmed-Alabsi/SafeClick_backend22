@@ -70,6 +70,7 @@ _REDIRECT_PARAMS = frozenset([
     "return_url", "returnurl", "next", "target", "dest", "destination",
     "rurl", "go", "continue", "forward", "out", "link", "goto",
     "callback", "ret", "service", "ref", "referer", "to", "redir",
+    "q", "u", "src", "query"
 ])
 
 
@@ -244,7 +245,16 @@ async def analyze_domain(url: str, use_cache: bool = True, lite_mode: bool = Fal
         from .dataset_loader import SAFETY_WHITELIST
         is_provider = domain in GENERIC_PROVIDERS
         has_subdomain = bool(info.get("subdomain"))
-        is_whitelisted = domain in SAFETY_WHITELIST and not (is_provider and has_subdomain)
+
+        is_brand_official = False
+        try:
+            from apps.domains.services.brand_service import BrandService
+            is_brand_official = BrandService.is_verified_official_domain(domain)
+        except Exception:
+            pass
+
+        is_whitelisted = (domain in SAFETY_WHITELIST or is_brand_official) and not (is_provider and has_subdomain)
+
         
         url_lower = url.lower()
         risky_keywords = [

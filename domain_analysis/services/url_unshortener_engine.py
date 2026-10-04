@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from builtins import Exception
 from .async_utils import get_async_session, run_cpu_bound
 from .dns_intelligence_engine import resolve_ip_custom
+from apps.common.url_validator import is_safe_redirect_url, is_private_or_internal_ip
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +104,22 @@ def _fetch_with_impersonation(url: str, ip: str = None, host: str = None, verify
     """Runs a curl_cffi request synchronously (called via run_cpu_bound)."""
     if not HAS_CURL_CFFI:
         return {"success": False, "error": "curl_cffi not installed"}
-    
+
+    # SSRF guard on target
+    safe, reason = is_safe_redirect_url(url)
+    if not safe:
+        logger.warning(f"[SSRF] Impersonation target unsafe {url}: {reason}")
+        return {"success": False, "error": f"SSRF Protection: {reason}", "waf_blocked": False}
+
+    if ip and is_private_or_internal_ip(ip):
+        logger.warning(f"[SSRF] Impersonation IP unsafe {ip}")
+        return {"success": False, "error": "SSRF Protection: Private IP blocked", "waf_blocked": False}
+
     kwargs = {
         "impersonate": "chrome120",
         "allow_redirects": True,
         "timeout": HOP_TIMEOUT * 2,
-        "verify": verify
+        "verify": True  # Always enforce SSL verification
     }
     
     target_url = url
@@ -123,6 +134,18 @@ def _fetch_with_impersonation(url: str, ip: str = None, host: str = None, verify
         
     try:
         response = curl_requests.get(target_url, **kwargs)
+
+        # Inspect all hops in redirect history for SSRF
+        for r in response.history:
+            safe, reason = is_safe_redirect_url(r.url)
+            if not safe:
+                logger.warning(f"[SSRF] Impersonation redirect hop unsafe {r.url}: {reason}")
+                return {"success": False, "error": f"SSRF Protection: {reason}", "waf_blocked": False}
+
+        safe, reason = is_safe_redirect_url(response.url)
+        if not safe:
+            logger.warning(f"[SSRF] Impersonation final destination unsafe {response.url}: {reason}")
+            return {"success": False, "error": f"SSRF Protection: {reason}", "waf_blocked": False}
         
         # Build redirect chain
         chain = []
@@ -143,7 +166,15 @@ def _fetch_with_impersonation(url: str, ip: str = None, host: str = None, verify
         return {"success": False, "error": str(e), "is_net_err": any(k in str(e).lower() for k in ['timeout', 'resolve', 'connection', 'reset', 'getaddrinfo'])}
 
 # ─── Layer 1: Fast Path ───────────────────────────────────────────────────
+MAX_BODY_SIZE = 256 * 1024  # 256KB max response read to prevent memory exhaustion DoS
+
 async def _fetch_aiohttp(url: str) -> Dict[str, Any]:
+    # SSRF guard on initial URL
+    safe, reason = is_safe_redirect_url(url)
+    if not safe:
+        logger.warning(f"[SSRF] Blocked unshorten target {url}: {reason}")
+        return {"success": False, "error": f"SSRF Protection: {reason}", "waf_blocked": False, "redirect_chain": []}
+
     session = await get_async_session()
     redirect_chain = []
     current_url = url
@@ -154,18 +185,26 @@ async def _fetch_aiohttp(url: str) -> Dict[str, Any]:
             if current_url in visited:
                 break
             visited.add(current_url)
-            # T9 FIX: Initialize text before the loop so it's always defined
-            # even if the GET branch is never reached.
-            text = ""
 
+            # SSRF check on every redirect hop
+            safe, reason = is_safe_redirect_url(current_url)
+            if not safe:
+                logger.warning(f"[SSRF] Blocked redirect hop {current_url}: {reason}")
+                return {
+                    "success": False,
+                    "error": f"SSRF Protection: {reason}",
+                    "waf_blocked": False,
+                    "redirect_chain": redirect_chain
+                }
+
+            text = ""
             try:
                 async with session.head(current_url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=HOP_TIMEOUT), ssl=True) as response:
                     status_code = response.status
                     headers = response.headers
-            except aiohttp.ClientSSLError:
-                async with session.head(current_url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=HOP_TIMEOUT), ssl=False) as response:
-                    status_code = response.status
-                    headers = response.headers
+            except aiohttp.ClientSSLError as ssl_err:
+                logger.warning(f"SSL verification failed for {current_url}: {ssl_err}")
+                break
 
             redirect_chain.append({"hop": hop + 1, "url": current_url, "status_code": status_code})
 
@@ -190,17 +229,27 @@ async def _fetch_aiohttp(url: str) -> Dict[str, Any]:
             for hop in range(MAX_REDIRECTS):
                 if current_url in visited: break
                 visited.add(current_url)
+
+                # SSRF check on every GET redirect hop
+                safe, reason = is_safe_redirect_url(current_url)
+                if not safe:
+                    logger.warning(f"[SSRF] Blocked GET redirect hop {current_url}: {reason}")
+                    return {
+                        "success": False,
+                        "error": f"SSRF Protection: {reason}",
+                        "waf_blocked": False,
+                        "redirect_chain": redirect_chain
+                    }
                 
                 try:
                     async with session.get(current_url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=HOP_TIMEOUT), ssl=True) as response:
                         status_code = response.status
                         headers = response.headers
-                        text = await response.text()
-                except aiohttp.ClientSSLError:
-                    async with session.get(current_url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=HOP_TIMEOUT), ssl=False) as response:
-                        status_code = response.status
-                        headers = response.headers
-                        text = await response.text()
+                        chunk = await response.content.read(MAX_BODY_SIZE)
+                        text = chunk.decode("utf-8", errors="replace")
+                except aiohttp.ClientSSLError as ssl_err:
+                    logger.warning(f"SSL verification failed on GET for {current_url}: {ssl_err}")
+                    break
 
                 redirect_chain.append({"hop": hop + 1, "url": current_url, "status_code": status_code})
 
@@ -277,16 +326,14 @@ async def unshorten_url(url: str) -> Dict[str, Any]:
         domain = urlparse(url).hostname
         ip = await resolve_ip_custom(domain)
         if ip:
-            # Try with strict SSL first
+            if is_private_or_internal_ip(ip):
+                logger.warning(f"[SSRF] Custom DNS resolved to internal IP {ip}. Aborting.")
+                return _build_fallback_result(url, l1_res)
+
+            # Strict SSL only - never bypass SSL validation
             l3_res = await run_cpu_bound(_fetch_with_impersonation, url, ip=ip, host=domain, verify=True)
             if l3_res and l3_res.get("success"):
                 return _build_success_result(url, l3_res)
-            
-            # Fallback to verify=False if strict SSL failed
-            logger.info(f"[Evasion] Layer 3 Strict SSL failed. Falling back to verify=False.")
-            l3_res_fallback = await run_cpu_bound(_fetch_with_impersonation, url, ip=ip, host=domain, verify=False)
-            if l3_res_fallback and l3_res_fallback.get("success"):
-                return _build_success_result(url, l3_res_fallback)
 
     # All layers failed, return best-effort fallback based on Layer 1/2 error
     return _build_fallback_result(url, l1_res)

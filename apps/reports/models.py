@@ -130,14 +130,12 @@ class Report(models.Model):
         super().save(*args, **kwargs)
 
     def _generate_tracking_number(self):
-        """توليد رقم تتبع فريد"""
-        import random
-        import string
+        """توليد رقم تتبع فريد وآمن تشفيرياً (CSPRNG)"""
+        import secrets
 
         prefix = 'RPT'
         timestamp = timezone.now().strftime('%y%m%d')
-        random_part = ''.join(
-            random.choices(string.ascii_uppercase + string.digits, k=6))
+        random_part = secrets.token_hex(4).upper()
 
         return f"{prefix}-{timestamp}-{random_part}"
 

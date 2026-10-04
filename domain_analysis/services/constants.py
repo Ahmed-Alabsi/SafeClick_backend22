@@ -41,6 +41,17 @@ SENSITIVE_BRANDS = frozenset([
     "fedex", "ups", "dhl", "usps",
     # AI
     "openai", "chatgpt",
+    # MENA & Regional Banking & Fintech
+    "alrajhibank", "alrajhi", "alahli", "snb", "riyadbank", "alinma",
+    "albilad", "anb", "stcpay", "urpay", "cib", "banquemisr", "nbe",
+    "instapay", "vodafonecash", "qnb", "adcb", "bankfab",
+    # MENA Government & Essential Platforms
+    "absher", "nafath", "tawakkalna", "qiwa", "muqeem", "gosi",
+    "zatca", "balady", "etimad", "sehhaty",
+    # MENA Telecom Providers
+    "stc", "mobily", "zain", "vodafone", "etisalat", "orange",
+    # MENA E-Commerce & Delivery
+    "noon", "jarir", "hungerstation", "jahez", "talabat", "mrsool",
 ])
 
 # ──────────────────────────────────────────────────────────────────────────────

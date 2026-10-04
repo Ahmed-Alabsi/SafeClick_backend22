@@ -158,9 +158,17 @@ class DecisionEngine:
                 if eng_details.get('domain_age', {}).get('details', {}).get('network_error'):
                     has_network_instability = True
                     
-                # Check for strong typosquatting
+                # Check for strong typosquatting & homoglyph (safely unwrap from EngineResult)
                 typo_res = eng_details.get('typosquatting', {})
-                if typo_res.get('status') == 'ok' and typo_res.get('details', {}).get('is_typosquatting'):
+                typo_payload = typo_res.get('data') if isinstance(typo_res.get('data'), dict) else typo_res
+                typo_details = typo_payload.get('details', {}) if isinstance(typo_payload, dict) else {}
+                if typo_details.get('is_typosquatting') or typo_details.get('brand_impersonation'):
+                    has_strong_typosquatting = True
+
+                homo_res = eng_details.get('homoglyph', {})
+                homo_payload = homo_res.get('data') if isinstance(homo_res.get('data'), dict) else homo_res
+                homo_details = homo_payload.get('details', {}) if isinstance(homo_payload, dict) else {}
+                if homo_details.get('confusable') or homo_details.get('punycode') or homo_details.get('latin_tricks'):
                     has_strong_typosquatting = True
                 
                 # v5: Detect whitelisted (fast_path) domains
@@ -203,10 +211,17 @@ class DecisionEngine:
         active_weight_sum = 0.0
         weighted_score = 0.0
         
+        # Zero-Day Threat Anti-Dilution:
+        # External databases (VT/GSB) only contain KNOWN reported threats.
+        # If internal engines firmly detected a threat (score >= 70 or strong impersonation),
+        # an absence of hit on VT/GSB (score 0) must NOT dilute the internal finding.
+        is_internal_threat = scores['engines'] >= 70 or has_strong_typosquatting
+
         for key in component_types:
             if confidences[key] > 0:
-                # Effective weight = base_weight * confidence
                 eff_weight = weights.get(key, 0.5) * confidences[key]
+                if is_internal_threat and key in ('vt', 'gsb') and scores[key] == 0:
+                    eff_weight *= 0.15  # Downweight clean status of signature DBs on new attacks
                 weighted_score += scores[key] * eff_weight
                 active_weight_sum += eff_weight
                 
@@ -249,12 +264,12 @@ class DecisionEngine:
         # ── Contextual Adjustments ───────────────────────────────────────────
         
         # Network Instability: Reduces confidence in automated findings
-        if has_network_instability and max_critical_score < 70:
+        if has_network_instability and max_critical_score < 70 and not is_internal_threat:
             final_score *= 0.85
             
         # Impersonation: Strong signal that shouldn't be diluted
         if has_strong_typosquatting:
-            final_score = max(final_score, 65) # Force suspicious/malicious
+            final_score = max(final_score, 75) # Force dangerous/malicious (threshold >= 60)
             
         # VT Clean: Slightly reduces risk, but ONLY when engines don't have
         # a strong conviction. VT "clean" on an unknown URL just means
@@ -264,15 +279,19 @@ class DecisionEngine:
         
         # ── Engine Conviction Floor (FINAL SAFETY NET) ────────────────────
         # Must be applied AFTER all adjustments to ensure a concrete engine
-        # finding can never be diluted below the suspicious threshold.
-        if scores['engines'] >= 50 and confidences['engines'] >= 0.7:
-            floor = 30 if scores['engines'] >= 70 else 25
+        # finding can never be diluted below the malicious threshold.
+        if scores['engines'] >= 70 and confidences['engines'] >= 0.7:
+            floor = 70
             if final_score < floor:
                 logger.info(
                     f"[CONVICTION] Engine Conviction Floor: "
                     f"engines={scores['engines']} (conf={confidences['engines']:.1f}) "
                     f"→ floor score from {final_score:.1f} to {floor}"
                 )
+                final_score = floor
+        elif scores['engines'] >= 50 and confidences['engines'] >= 0.7:
+            floor = 45
+            if final_score < floor:
                 final_score = floor
             
         final_score = min(100, max(0, int(round(final_score))))

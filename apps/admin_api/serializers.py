@@ -3,6 +3,9 @@ from apps.scans.models import Scan, ScanSourceResult, WhitelistEntry, Blacklist,
 from apps.domains.models import Domain
 from apps.accounts.models import User
 from apps.reports.models import Report
+from apps.feedback.models import AppRating
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 
 
 class DashboardScanSerializer(serializers.ModelSerializer):
@@ -14,9 +17,19 @@ class DashboardScanSerializer(serializers.ModelSerializer):
 
 
 class ScanSourceResultSerializer(serializers.ModelSerializer):
+    scan_url = serializers.CharField(source='scan.url', read_only=True)
+
     class Meta:
         model = ScanSourceResult
-        fields = ['source_type', 'verdict', 'risk_score', 'confidence', 'source_weight', 'latency_ms']
+        fields = ['id', 'scan_url', 'source_type', 'verdict', 'risk_score', 'confidence', 'source_weight', 'latency_ms', 'checked_at']
+
+class AppRatingSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.name', read_only=True)
+    user_email = serializers.CharField(source='user.email', read_only=True)
+
+    class Meta:
+        model = AppRating
+        fields = ['id', 'rating', 'comment', 'created_at', 'user_name', 'user_email']
 
 
 class ScanDetailSerializer(DashboardScanSerializer):
@@ -102,9 +115,71 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'name', 'scanned_links', 'detected_threats',
-            'accuracy_rate', 'is_active', 'is_staff', 'created_at', 'last_login'
+            'id', 'email', 'name', 'profile_image', 'scanned_links', 'detected_threats',
+            'accuracy_rate', 'is_email_verified', 'is_active', 'is_staff', 'created_at', 'last_login'
         ]
+
+class UserCreateSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    role = serializers.ChoiceField(choices=['admin', 'user'], write_only=True, default='user')
+
+    class Meta:
+        model = User
+        fields = ['email', 'name', 'password', 'role', 'profile_image']
+
+    def validate_password(self, value):
+        try:
+            validate_password(value)
+        except ValidationError as e:
+            raise serializers.ValidationError(list(e.messages))
+        return value
+
+    def create(self, validated_data):
+        role = validated_data.pop('role', 'user')
+        password = validated_data.pop('password')
+        
+        # Use create_user from manager to securely hash password
+        user = User.objects.create_user(**validated_data, password=password)
+        
+        # Assign role
+        if role == 'admin':
+            user.is_staff = True
+            user.save()
+            
+        return user
+
+class UserUpdateSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True, style={'input_type': 'password'})
+    role = serializers.ChoiceField(choices=['admin', 'user'], write_only=True, required=False)
+
+    class Meta:
+        model = User
+        fields = ['email', 'name', 'password', 'role', 'profile_image', 'is_active', 'is_email_verified']
+
+    def validate_password(self, value):
+        if not value:
+            return value
+        try:
+            validate_password(value)
+        except ValidationError as e:
+            raise serializers.ValidationError(list(e.messages))
+        return value
+
+    def update(self, instance, validated_data):
+        role = validated_data.pop('role', None)
+        password = validated_data.pop('password', None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+            
+        if password:
+            instance.set_password(password)
+            
+        if role is not None:
+            instance.is_staff = (role == 'admin')
+            
+        instance.save()
+        return instance
 
 
 class ScanCacheSerializer(serializers.ModelSerializer):
@@ -123,5 +198,30 @@ class ReportSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'link', 'category', 'status', 'severity',
             'reporter_name', 'is_anonymous', 'comment',
-            'user_email', 'scan_url', 'created_at', 'tracking_number'
+            'user_email', 'scan_url', 'created_at', 'tracking_number',
+            'investigation_notes', 'is_confirmed_threat', 'reviewed_at', 'resolved_at'
         ]
+
+class ReportUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Report
+        fields = ['status', 'severity', 'category', 'investigation_notes', 'is_confirmed_threat']
+
+    def update(self, instance, validated_data):
+        status = validated_data.get('status', instance.status)
+        notes = validated_data.get('investigation_notes', instance.investigation_notes)
+        request = self.context.get('request')
+        user = request.user if request else None
+
+        if status == 'confirmed' and instance.status != 'confirmed':
+            instance.confirm_threat(notes=notes, changed_by=user)
+        elif status == 'resolved' and instance.status != 'resolved':
+            instance.resolve_report(notes=notes, changed_by=user)
+        elif status == 'rejected' and instance.status != 'rejected':
+            instance.reject_report(notes=notes, changed_by=user)
+        else:
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save()
+            
+        return instance

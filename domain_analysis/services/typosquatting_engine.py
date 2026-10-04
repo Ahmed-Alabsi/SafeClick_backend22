@@ -24,14 +24,47 @@ from rapidfuzz.distance.Levenshtein import distance as levenshtein_distance
 from .bloom_filter import is_legit_domain
 from .trie_index import get_candidates
 from .dataset_loader import SAFETY_WHITELIST
-from .domain_utils import extract_domain_info
+from .domain_utils import extract_domain_info, extract_canonical_labels
 from .constants import LATIN_TRICKS, SENSITIVE_BRANDS, SHARED_HOSTING_PROVIDERS
 
 logger = logging.getLogger(__name__)
 
+# Dynamic Brand Service integration with static fallback
+try:
+    from apps.domains.services.brand_service import BrandService
+except Exception:
+    BrandService = None
+
+
+def _get_active_brands() -> Set[str]:
+    """Retrieves active sensitive brands from dynamic catalog with static fallback."""
+    if BrandService:
+        try:
+            return BrandService.get_sensitive_brands()
+        except Exception:
+            pass
+    return SENSITIVE_BRANDS
+
+
+def _get_token_boundary_keywords() -> Dict[str, Dict[str, Any]]:
+    """Retrieves token boundary keywords from dynamic catalog with static fallback."""
+    if BrandService:
+        try:
+            return BrandService.get_token_boundary_keywords()
+        except Exception:
+            pass
+    # Fallback for short brands <= 3 chars
+    fallback = {}
+    for b in SENSITIVE_BRANDS:
+        if len(b) <= 3:
+            fallback[b] = {"brand_slug": b, "brand_name": b, "weight": 1.0}
+    return fallback
+
+
 # --- Configuration ---
 SIMILARITY_THRESHOLD = 80
 LEVENSHTEIN_MAX_DISTANCE = 3  # Max edit distance for brand fuzzy match
+
 
 # Real domains for sensitive brands — used to distinguish
 # legitimate brand domains from impersonation attempts.
@@ -91,9 +124,52 @@ BRAND_REAL_DOMAINS = {
     "fedex": {"fedex.com"},
     "ups": {"ups.com"},
     "dhl": {"dhl.com"},
-    "usps": {"usps.com"},
     "openai": {"openai.com"},
     "chatgpt": {"chatgpt.com", "chat.openai.com"},
+    # MENA Banking & Fintech
+    "alrajhibank": {"alrajhibank.com.sa", "alrajhi.bank"},
+    "alrajhi": {"alrajhibank.com.sa", "alrajhi.bank"},
+    "alahli": {"alahli.com", "alahlionline.com"},
+    "snb": {"alahli.com", "snb.com.sa"},
+    "riyadbank": {"riyadbank.com"},
+    "alinma": {"alinma.com"},
+    "albilad": {"bankalbilad.com"},
+    "anb": {"anb.com.sa"},
+    "stcpay": {"stcpay.com.sa"},
+    "urpay": {"urpay.com.sa"},
+    "cib": {"cibeg.com"},
+    "banquemisr": {"banquemisr.com"},
+    "nbe": {"nbe.com.eg"},
+    "instapay": {"instapay.eg"},
+    "vodafonecash": {"vodafone.com.eg"},
+    "qnb": {"qnb.com"},
+    "adcb": {"adcb.com"},
+    "bankfab": {"bankfab.com"},
+    # MENA Government & Essential Platforms
+    "absher": {"absher.sa"},
+    "nafath": {"nafath.sa", "iam.gov.sa"},
+    "tawakkalna": {"tawakkalna.sdaia.gov.sa", "tawakkalna.sa"},
+    "qiwa": {"qiwa.sa"},
+    "muqeem": {"muqeem.sa"},
+    "gosi": {"gosi.gov.sa"},
+    "zatca": {"zatca.gov.sa"},
+    "balady": {"balady.gov.sa"},
+    "etimad": {"etimad.sa"},
+    "sehhaty": {"sehhaty.sa"},
+    # MENA Telecom
+    "stc": {"stc.com.sa", "stc.com"},
+    "mobily": {"mobily.com.sa"},
+    "zain": {"zain.com", "sa.zain.com"},
+    "vodafone": {"vodafone.com", "vodafone.com.eg"},
+    "etisalat": {"etisalat.ae", "etisalat.eg", "eand.com"},
+    "orange": {"orange.com", "orange.eg"},
+    # MENA E-Commerce & Delivery
+    "noon": {"noon.com"},
+    "jarir": {"jarir.com"},
+    "hungerstation": {"hungerstation.com"},
+    "jahez": {"jahez.net"},
+    "talabat": {"talabat.com"},
+    "mrsool": {"mrsool.co"},
 }
 
 
@@ -130,28 +206,50 @@ def _normalize_domain(domain: str) -> str:
 def _is_real_brand_domain(domain: str, brand: str) -> bool:
     """
     Checks if the domain IS the real/official domain for a brand.
-    
-    Critical for distinguishing:
-      ✅ facebook.com  → real brand domain
-      ❌ faccebook.com → impersonation
+    Uses dynamic BrandService with fallback to BRAND_REAL_DOMAINS.
     """
-    real_domains = BRAND_REAL_DOMAINS.get(brand, set())
-    return domain in real_domains
+    if not domain or not brand:
+        return False
+    if BrandService:
+        try:
+            return BrandService.is_official_domain_for_brand(domain, brand)
+        except Exception:
+            pass
+    real_domains = BRAND_REAL_DOMAINS.get(brand.lower(), set())
+    return domain.lower() in real_domains
+
 
 def _detect_subdomain_impersonation(host: str) -> Optional[Dict[str, Any]]:
     """
     Detects if a sensitive brand is hidden in the subdomain.
-    e.g. paypal-login-secure.example.com
+    e.g. paypal-login-secure.example.com or snb.secure-login.com
     """
-    info = extract_domain_info(host)
-    subdomain = info.get("subdomain", "").lower()
-    root_domain = info.get("registrable_domain", "").lower()
+    canonical = extract_canonical_labels(host)
+    subdomain = canonical.get("subdomain", "").lower()
+    root_domain = canonical.get("registrable_domain", "").lower()
+    tokens = canonical.get("tokens", set())
     
     if not subdomain:
         return None
-        
-    for brand in SENSITIVE_BRANDS:
-        if len(brand) < 4: continue
+
+    # Check token-boundary keywords in subdomain (e.g. snb, cib, stc)
+    token_boundary_kws = _get_token_boundary_keywords()
+    for kw, meta in token_boundary_kws.items():
+        if kw in tokens and not _is_real_brand_domain(root_domain, kw):
+            return {
+                "is_typosquatting": True,
+                "brand_impersonation": True,
+                "target_brand": kw,
+                "brand_name": meta.get("brand_name", kw),
+                "method": "subdomain_token_impersonation",
+                "confidence": 0.96,
+                "reason": f"Brand token '{kw}' found in subdomain of unverified root domain"
+            }
+
+    active_brands = _get_active_brands()
+    for brand in active_brands:
+        if len(brand) < 4 and brand not in token_boundary_kws:
+            continue
         
         if brand in subdomain:
             # If the brand is in the subdomain, ensure the root is NOT the real brand
@@ -165,6 +263,7 @@ def _detect_subdomain_impersonation(host: str) -> Optional[Dict[str, Any]]:
                     "reason": f"Brand '{brand}' found in subdomain but not in root domain"
                 }
     return None
+
 
 
 def _normalize_latin_tricks(domain: str) -> str:
@@ -221,6 +320,10 @@ def _compute_similarity(domain: str, candidates: List[str]) -> Optional[Dict[str
     for legit in candidates:
         if _is_same_root(legit, domain): continue
         legit_main = legit.split(".")[0]
+
+        # Short acronyms/brands (< 4 chars e.g. snb, cib, stc) must match via Token-Boundary, not fuzzy distance
+        if len(legit_main) < 4 and domain_main != legit_main:
+            continue
         
         # ── TLD-Squatting / Exact Match Logic ──────────────────────────────
         # If names match exactly (nulls.gg vs nulls.de), only flag if the 
@@ -288,12 +391,15 @@ def detect_typosquatting(domain: str) -> Dict[str, Any]:
             logger.warning(f"[TYPOSQUATTING] Subdomain impersonation detected: {domain}")
             return {"status": "ok", "details": subdomain_impersonation}
 
-        # Step 0.5: Extract Registrable Domain (Root Domain)
-        # We must perform similarity checks on the root domain, not the first subdomain part.
-        info = extract_domain_info(domain)
-        root_domain = info.get("registrable_domain", "").lower()
+        # Step 0.5: Extract Registrable Domain (Root Domain) & Canonical Labels
+        canonical = extract_canonical_labels(domain)
+        root_domain = canonical.get("registrable_domain", "").lower()
         if not root_domain:
             root_domain = domain.lower()
+        main_part = canonical.get("main_part", "").lower()
+        if not main_part:
+            main_part = root_domain.split(".")[0]
+        tokens = canonical.get("tokens", set())
             
         # ── Shared Hosting Platform Guard ─────────────────────────────────
         # If the root domain IS a shared hosting provider (vercel.app, github.io),
@@ -302,18 +408,44 @@ def detect_typosquatting(domain: str) -> Dict[str, Any]:
         if root_domain in SHARED_HOSTING_PROVIDERS:
             return {"status": "ok", "details": {"is_typosquatting": False, "reason": "Shared hosting platform root"}}
 
-        main_part = root_domain.split(".")[0]
+        active_brands = _get_active_brands()
 
-        # Step 1: Strict Safe Whitelist
+        # Step 1: Strict Safe Whitelist & Verified Official Brand Domains
+        if _is_real_brand_domain(domain, main_part) or _is_real_brand_domain(root_domain, main_part):
+            return {"status": "ok", "details": {"is_typosquatting": False, "reason": "Verified official brand domain"}}
+
         if root_domain in SAFETY_WHITELIST or domain in SAFETY_WHITELIST:
             return {"status": "ok", "details": {"is_typosquatting": False, "reason": "Legitimate domain"}}
+
+        # ── Step 1.5: Token-Boundary Brand Detection (for short/abbreviated brands) ──
+        # Handles 3-letter & delimited brands (e.g. snb, cib, anb, stc, dhl) without False Positives
+        token_boundary_kws = _get_token_boundary_keywords()
+        for kw, meta in token_boundary_kws.items():
+            if kw in tokens:
+                # Is this the actual official domain for this brand?
+                if _is_real_brand_domain(domain, kw) or _is_real_brand_domain(root_domain, kw):
+                    return {"status": "ok", "details": {
+                        "is_typosquatting": False,
+                        "reason": f"Verified official {kw} domain"
+                    }}
+                else:
+                    logger.warning(f"[TYPOSQUATTING] Token-boundary brand impersonation detected: {domain} (brand: {kw})")
+                    return {"status": "ok", "details": {
+                        "is_typosquatting": True,
+                        "brand_impersonation": True,
+                        "target_brand": kw,
+                        "brand_name": meta.get("brand_name", kw),
+                        "original_domain": domain,
+                        "method": "token_boundary_match",
+                        "confidence": 0.96
+                    }}
 
         # ── Step 2: Normalization Pipeline (NEW - v5) ─────────────────────
         # This runs BEFORE the bloom filter to defeat bloom filter poisoning.
         # If normalization reveals a brand match, flag immediately.
         normalized_full = _normalize_domain(root_domain)
         
-        for brand in SENSITIVE_BRANDS:
+        for brand in active_brands:
             if normalized_full == _normalize_domain(brand):
                 # Normalized domain matches a brand exactly!
                 # But is this the REAL brand domain?
@@ -359,7 +491,7 @@ def detect_typosquatting(domain: str) -> Dict[str, Any]:
             # Double-check: even if in bloom filter, verify no brand proximity
             # This catches edge cases where normalization doesn't exact-match
             # but the domain is still suspiciously close to a brand
-            for brand in SENSITIVE_BRANDS:
+            for brand in active_brands:
                 if len(brand) >= 4:  # Only check meaningful brands
                     lev_dist = levenshtein_distance(main_part, brand)
                     if lev_dist <= 2 and main_part != brand:
@@ -394,7 +526,7 @@ def detect_typosquatting(domain: str) -> Dict[str, Any]:
 
         # ── Step 4.5: Levenshtein Distance Brand Match ────────────────────
         # Uses dynamic thresholds based on brand length to prevent FPs.
-        for brand in SENSITIVE_BRANDS:
+        for brand in active_brands:
             brand_len = len(brand)
             if brand_len < 4: continue
             
@@ -427,7 +559,7 @@ def detect_typosquatting(domain: str) -> Dict[str, Any]:
         # ── Step 5: Brand containment check ───────────────────────────────
         # e.g., "instagram-copyright.com" → contains "instagram"
         # But must distinguish from legitimate usage like "facebookmail.com"
-        for brand in SENSITIVE_BRANDS:
+        for brand in active_brands:
             if len(brand) < 4:
                 continue
                 
@@ -444,6 +576,7 @@ def detect_typosquatting(domain: str) -> Dict[str, Any]:
                     }
 
         return {"status": "ok", "details": {"is_typosquatting": False}}
+
 
     except Exception as e:
         logger.error(f"Typosquatting detection error: {e}", exc_info=True)

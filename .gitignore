@@ -35,5 +35,12 @@ media/profile_images/
 *.pid
 
 *.csv
+*.venv
 
 *.txt
+!requirements.txt
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example

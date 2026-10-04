@@ -74,8 +74,8 @@ async def check_gsb_threat(url: str) -> Dict[str, Any]:
                     }
                 else:
                     logger.warning(f"GSB API returned status {response.status}")
-                    return {"status": "error", "error": f"GSB API Error {response.status}"}
+                    return {"status": "skipped", "error": f"GSB API Error {response.status}", "details": "Google Safe Browsing: Skipped due to API limits"}
                     
     except Exception as e:
         logger.error(f"GSB Engine failure: {e}")
-        return {"status": "error", "error": str(e)}
+        return {"status": "skipped", "error": str(e), "details": "Google Safe Browsing: Connection failed"}

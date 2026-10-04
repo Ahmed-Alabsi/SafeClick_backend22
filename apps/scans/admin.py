@@ -1,13 +1,29 @@
 # apps/scans/admin.py
 """
-SafeClick Admin Dashboard — Production-Grade
-─────────────────────────────────────────────
-Full CRUD, filtering, search, and visual badges for all scan models.
+SafeClick Scan & Threat Defense Admin Console — Django Unfold
+─────────────────────────────────────────────────────────────
+Full telemetry, multi-engine inspection, blacklist/whitelist orchestration,
+and real-time verdicts.
 """
 from django.contrib import admin
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.utils import timezone
+from unfold.admin import ModelAdmin, TabularInline
+from unfold.decorators import display, action
 from .models import Scan, ScanSourceResult, ScanCache, Blacklist, WhitelistEntry
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SCAN INLINE FOR SOURCES
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ScanSourceResultInline(TabularInline):
+    model = ScanSourceResult
+    extra = 0
+    can_delete = False
+    fields = ['source_type', 'verdict', 'risk_score', 'confidence', 'source_weight', 'checked_at']
+    readonly_fields = ['source_type', 'verdict', 'risk_score', 'confidence', 'source_weight', 'checked_at']
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -15,18 +31,13 @@ from .models import Scan, ScanSourceResult, ScanCache, Blacklist, WhitelistEntry
 # ═══════════════════════════════════════════════════════════════════════════
 
 @admin.register(Scan)
-class ScanAdmin(admin.ModelAdmin):
+class ScanAdmin(ModelAdmin):
     list_display = [
-        'id_short',
-        'url_short',
-        'domain_display',
-        'status_colored',
+        'url_header',
+        'verdict_label',
         'risk_badge',
-        'scan_level_badge',
-        'user_email',
+        'user_display',
         'timestamp_display',
-        'threats_badge',
-        'source_badge',
     ]
     
     list_filter = [
@@ -41,141 +52,122 @@ class ScanAdmin(admin.ModelAdmin):
     ordering = ['-created_at']
     date_hierarchy = 'created_at'
     list_select_related = ['user', 'domain']
+    list_filter_submit = True
+    list_fullwidth = True
+    inlines = [ScanSourceResultInline]
     
     fieldsets = (
-        ('معلومات الرابط', {
+        ('معلومات الرابط والنطاق', {
             'fields': ('url', 'url_hash', 'domain_name', 'domain', 'ip_address'),
         }),
-        ('المستخدم', {
+        ('بيانات المستخدم والمصدر', {
             'fields': ('user', 'guest_id', 'source'),
         }),
         ('إعدادات الفحص', {
             'fields': ('scan_level',),
         }),
-        ('النتائج النهائية', {
+        ('النتائج والقرار الأمني الموحد', {
             'fields': ('final_verdict', 'risk_score', 'safe', 'result', 'score'),
-            'description': 'النتيجة المجمعة من جميع محركات الفحص',
+            'description': 'القرار المجمع من كافة محركات الفحص والذكاء الاصطناعي',
         }),
-        ('تقرير الفحص', {
+        ('تقرير وسيناريو الفحص', {
             'fields': ('scan_scenario', 'reason', 'details'),
             'classes': ('collapse',),
         }),
-        ('التهديدات', {
+        ('التهديدات المكتشفة', {
             'fields': ('threats_found', 'threats_count'),
             'classes': ('collapse',),
         }),
-        ('بيانات تقنية', {
+        ('البيانات التقنية والخوادم', {
             'fields': ('response_time', 'server_info'),
             'classes': ('collapse',),
         }),
-        ('التواريخ', {
+        ('سجلات التوقيت', {
             'fields': ('created_at', 'updated_at', 'deleted_at'),
+            'classes': ('collapse',),
         }),
     )
     
     readonly_fields = ['id', 'url_hash', 'created_at', 'updated_at']
-    
     actions = ['mark_safe', 'mark_malicious', 'soft_delete_selected']
 
-    # ── Custom display methods ───────────────────────────────────────────
+    @display(description='الرابط والنطاق', header=True)
+    def url_header(self, obj):
+        domain = obj.domain_name or (obj.domain.domain if obj.domain else 'بدون نطاق')
+        url_snippet = obj.url[:60] + '…' if len(obj.url) > 60 else obj.url
+        return [url_snippet, f"النطاق: {domain}"]
 
-    def id_short(self, obj):
-        return str(obj.id)[:8] + '…'
-    id_short.short_description = 'المعرف'
-    
-    def url_short(self, obj):
-        url = obj.url or ''
-        return url[:55] + '…' if len(url) > 55 else url
-    url_short.short_description = 'الرابط'
-
-    def domain_display(self, obj):
-        if obj.domain_name:
-            return format_html(
-                '<span style="font-family:monospace;color:#3b82f6;">{}</span>',
-                obj.domain_name)
-        return '—'
-    domain_display.short_description = 'الدومين'
-    
-    def status_colored(self, obj):
+    @display(description='القرار الأمني', label={
+        'safe': 'success',
+        'malicious': 'danger',
+        'suspicious': 'warning',
+        'unknown': 'info',
+    })
+    def verdict_label(self, obj):
+        if obj.final_verdict:
+            return obj.final_verdict
         if obj.safe is True:
-            return format_html(
-                '<span style="background:#16a34a;color:#fff;padding:3px 10px;'
-                'border-radius:12px;font-weight:bold;font-size:0.85em;">✅ آمن</span>')
-        elif obj.safe is False:
-            return format_html(
-                '<span style="background:#dc2626;color:#fff;padding:3px 10px;'
-                'border-radius:12px;font-weight:bold;font-size:0.85em;">🔴 خطير</span>')
-        return format_html(
-            '<span style="background:#f59e0b;color:#fff;padding:3px 10px;'
-            'border-radius:12px;font-weight:bold;font-size:0.85em;">⚠️ مشبوه</span>')
-    status_colored.short_description = 'الحالة'
-    
+            return 'safe'
+        if obj.safe is False:
+            return 'malicious'
+        return 'suspicious'
+
+    @display(description='معدل الخطر', ordering='risk_score')
     def risk_badge(self, obj):
         score = obj.risk_score or 0
         if score < 40:
-            color, bg = '#16a34a', '#dcfce7'
-        elif score < 80:
-            color, bg = '#f59e0b', '#fef3c7'
-        else:
-            color, bg = '#dc2626', '#fee2e2'
-        return format_html(
-            '<div style="background:{};color:{};padding:2px 8px;border-radius:6px;'
-            'text-align:center;font-weight:bold;min-width:50px;">{}</div>',
-            bg, color, f'{score}%')
-    risk_badge.short_description = 'الخطورة'
-    
-    def scan_level_badge(self, obj):
-        colors = {'basic': '#6b7280', 'standard': '#3b82f6', 'deep': '#8b5cf6'}
-        icons = {'basic': '⚡', 'standard': '📊', 'deep': '🔬'}
-        color = colors.get(obj.scan_level, '#6b7280')
-        icon = icons.get(obj.scan_level, '📋')
-        return format_html(
-            '<span style="background:{};color:#fff;padding:2px 6px;'
-            'border-radius:8px;font-size:0.85em;">{} {}</span>',
-            color, icon, obj.get_scan_level_display())
-    scan_level_badge.short_description = 'المستوى'
+            return format_html('<span class="font-mono text-green-600 dark:text-green-400">{}%</span>', score)
+        if score < 80:
+            return format_html('<span class="font-mono text-orange-600 dark:text-orange-400 font-semibold">{}%</span>', score)
+        return format_html('<span class="font-mono text-red-600 dark:text-red-400 font-bold">{}%</span>', score)
 
-    def user_email(self, obj):
+    @display(description='مستوى الفحص', label={
+        'basic': 'info',
+        'standard': 'primary',
+        'deep': 'warning',
+    })
+    def scan_level_label(self, obj):
+        return obj.scan_level
+
+    @display(description='المستخدم')
+    def user_display(self, obj):
         if obj.user:
             return obj.user.email
         if obj.guest_id:
-            return format_html(
-                '<span style="color:#9ca3af;font-size:0.9em;">👤 زائر</span>')
+            return format_html('<span class="text-base-400 font-mono text-xs">👤 زائر ({})</span>', str(obj.guest_id)[:8])
         return '—'
-    user_email.short_description = 'المستخدم'
-    
+
+    @display(description='التاريخ')
     def timestamp_display(self, obj):
         return obj.created_at.strftime('%Y-%m-%d %H:%M')
-    timestamp_display.short_description = 'التاريخ'
-    
+
+    @display(description='التهديدات')
     def threats_badge(self, obj):
         count = obj.threats_count or 0
         if count > 0:
-            return format_html(
-                '<span style="background:#dc2626;color:#fff;padding:3px 10px;'
-                'border-radius:12px;font-weight:bold;">⚠️ {}</span>', count)
-        return format_html('<span style="color:#16a34a;">✅</span>')
-    threats_badge.short_description = 'التهديدات'
-    
-    def source_badge(self, obj):
-        return format_html(
-            '<span style="background:#1f2937;color:#e5e7eb;padding:2px 6px;'
-            'border-radius:4px;font-size:0.85em;">{}</span>', obj.source)
-    source_badge.short_description = 'المصدر'
+            return format_html('<span class="text-red-600 dark:text-red-400 font-bold font-mono">{}</span>', count)
+        return mark_safe('<span class="text-green-600 dark:text-green-400 font-mono">0</span>')
 
-    # ── Admin Actions ────────────────────────────────────────────────────
+    @display(description='المصدر', label={
+        'api': 'info',
+        'web': 'primary',
+        'mobile': 'success',
+        'extension': 'warning',
+    })
+    def source_label(self, obj):
+        return obj.source
 
-    @admin.action(description='✅ تحديد كـ آمن')
+    @action(description='تحديد كـ آمن (Safe)', icon='verified')
     def mark_safe(self, request, queryset):
         count = queryset.update(safe=True, result='safe', final_verdict='safe')
         self.message_user(request, f'تم تحديد {count} فحص كآمن.')
 
-    @admin.action(description='🔴 تحديد كـ خطير')
+    @action(description='تحديد كـ خطير (Malicious)', icon='gpp_bad')
     def mark_malicious(self, request, queryset):
         count = queryset.update(safe=False, result='malicious', final_verdict='malicious')
         self.message_user(request, f'تم تحديد {count} فحص كخطير.')
 
-    @admin.action(description='🗑️ حذف مؤقت (Soft Delete)')
+    @action(description='حذف مؤقت (Soft Delete)', icon='delete')
     def soft_delete_selected(self, request, queryset):
         count = queryset.update(deleted_at=timezone.now())
         self.message_user(request, f'تم حذف {count} فحص مؤقتاً.')
@@ -186,13 +178,13 @@ class ScanAdmin(admin.ModelAdmin):
 # ═══════════════════════════════════════════════════════════════════════════
 
 @admin.register(ScanSourceResult)
-class ScanSourceResultAdmin(admin.ModelAdmin):
+class ScanSourceResultAdmin(ModelAdmin):
     list_display = [
-        'scan_url_short',
-        'source_type_badge',
-        'verdict_badge',
+        'scan_url_header',
+        'source_label',
+        'verdict_label',
         'risk_display',
-        'confidence_bar',
+        'confidence_display',
         'weight_display',
         'checked_at',
     ]
@@ -207,80 +199,63 @@ class ScanSourceResultAdmin(admin.ModelAdmin):
     date_hierarchy = 'checked_at'
     list_select_related = ['scan']
     readonly_fields = ['id', 'checked_at']
+    list_filter_submit = True
+    list_fullwidth = True
 
     fieldsets = (
-        ('الفحص', {
+        ('الفحص المرتبط', {
             'fields': ('scan',),
         }),
-        ('نتيجة المحرك', {
+        ('قرار المحرك والأوزان', {
             'fields': ('source_type', 'verdict', 'risk_score', 'confidence', 'source_weight'),
         }),
-        ('البيانات الخام', {
+        ('الاستجابة الخام (Raw Response Payload)', {
             'fields': ('raw_data',),
             'classes': ('collapse',),
         }),
     )
 
-    def scan_url_short(self, obj):
+    @display(description='الرابط', header=True)
+    def scan_url_header(self, obj):
         url = obj.scan.url if obj.scan else '—'
-        return url[:50] + '…' if len(url) > 50 else url
-    scan_url_short.short_description = 'الرابط'
+        return [url[:55] + '…' if len(url) > 55 else url, f"المعرف: {str(obj.scan_id)[:8] if obj.scan_id else '—'}"]
 
-    def source_type_badge(self, obj):
-        colors = {
-            'gsb': '#ea580c', 'vt': '#7c3aed', 'engines': '#2563eb',
-            'ai': '#059669', 'blacklist': '#dc2626', 'whitelist': '#16a34a',
-            'heuristic': '#6b7280',
-        }
-        icons = {
-            'gsb': '🛡️', 'vt': '🦠', 'engines': '⚙️',
-            'ai': '🧠', 'blacklist': '🚫', 'whitelist': '✅',
-            'heuristic': '🔍',
-        }
-        color = colors.get(obj.source_type, '#6b7280')
-        icon = icons.get(obj.source_type, '📋')
-        return format_html(
-            '<span style="background:{};color:#fff;padding:2px 8px;'
-            'border-radius:8px;font-weight:bold;font-size:0.85em;">{} {}</span>',
-            color, icon, obj.get_source_type_display())
-    source_type_badge.short_description = 'المحرك'
+    @display(description='محرك الفحص', label={
+        'gsb': 'warning',
+        'vt': 'danger',
+        'engines': 'primary',
+        'ai': 'success',
+        'blacklist': 'danger',
+        'whitelist': 'success',
+        'heuristic': 'info',
+    })
+    def source_label(self, obj):
+        return obj.source_type
 
-    def verdict_badge(self, obj):
-        colors = {
-            'safe': '#16a34a', 'suspicious': '#f59e0b',
-            'malicious': '#dc2626', 'error': '#6b7280', 'skipped': '#9ca3af',
-        }
-        color = colors.get(obj.verdict, '#6b7280')
-        return format_html(
-            '<span style="color:{};font-weight:bold;">{}</span>',
-            color, obj.get_verdict_display())
-    verdict_badge.short_description = 'الحكم'
+    @display(description='الحكم الأمني', label={
+        'safe': 'success',
+        'suspicious': 'warning',
+        'malicious': 'danger',
+        'error': 'info',
+        'skipped': 'info',
+    })
+    def verdict_label(self, obj):
+        return obj.verdict
 
+    @display(description='معدل الخطر')
     def risk_display(self, obj):
         score = obj.risk_score or 0
-        if score <= 20:
-            color = '#16a34a'
-        elif score <= 50:
-            color = '#f59e0b'
-        else:
-            color = '#dc2626'
-        return format_html(
-            '<span style="color:{};font-weight:bold;">{}%</span>', color, score)
-    risk_display.short_description = 'الخطورة'
+        color = 'text-green-600 dark:text-green-400 font-mono' if score <= 20 else 'text-orange-600 dark:text-orange-400 font-mono' if score <= 50 else 'text-red-600 dark:text-red-400 font-mono font-bold'
+        return format_html('<span class="{}">{}%</span>', color, score)
 
-    def confidence_bar(self, obj):
-        conf = obj.confidence or 0.0
-        pct = int(conf * 100)
-        color = '#16a34a' if pct >= 80 else '#f59e0b' if pct >= 50 else '#dc2626'
-        return format_html(
-            '<div style="background:#e5e7eb;border-radius:4px;width:80px;height:14px;">'
-            '<div style="background:{};width:{}%;height:100%;border-radius:4px;"></div>'
-            '</div> <small>{}%</small>', color, pct, pct)
-    confidence_bar.short_description = 'الثقة'
+    @display(description='نسبة الثقة')
+    def confidence_display(self, obj):
+        conf = int((obj.confidence or 0.0) * 100)
+        return format_html('<span class="font-mono text-base-300">{}%</span>', conf)
 
+    @display(description='وزن المحرك')
     def weight_display(self, obj):
-        return f'{obj.source_weight:.2f}'
-    weight_display.short_description = 'الوزن'
+        return format_html('<span class="font-mono text-base-400">{:.2f}</span>', obj.source_weight)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -288,10 +263,10 @@ class ScanSourceResultAdmin(admin.ModelAdmin):
 # ═══════════════════════════════════════════════════════════════════════════
 
 @admin.register(ScanCache)
-class ScanCacheAdmin(admin.ModelAdmin):
+class ScanCacheAdmin(ModelAdmin):
     list_display = [
-        'url_short', 'result_badge', 'risk_score',
-        'scan_level_badge', 'expires_display', 'is_expired_badge',
+        'url_header', 'result_label', 'risk_score',
+        'scan_level', 'expires_display', 'is_active',
     ]
     list_filter = [
         'result', 'scan_level',
@@ -301,45 +276,46 @@ class ScanCacheAdmin(admin.ModelAdmin):
     list_per_page = 30
     ordering = ['-expires_at']
     readonly_fields = ['url_hash']
-    
     actions = ['clear_expired_cache', 'clear_all_cache']
+    actions_list = ['clear_expired_cache']
+    list_filter_submit = True
+    list_fullwidth = True
 
-    def url_short(self, obj):
-        return obj.url[:55] + '…' if len(obj.url) > 55 else obj.url
-    url_short.short_description = 'الرابط'
+    @display(description='الرابط المحفوظ', header=True)
+    def url_header(self, obj):
+        url = obj.url or ''
+        return [url[:55] + '…' if len(url) > 55 else url, f"Hash: {obj.url_hash[:16]}…"]
 
-    def result_badge(self, obj):
-        colors = {'safe': '#16a34a', 'suspicious': '#f59e0b', 'dangerous': '#dc2626'}
-        color = colors.get(obj.result, '#6b7280')
-        return format_html(
-            '<span style="color:{};font-weight:bold;">{}</span>', color, obj.result)
-    result_badge.short_description = 'النتيجة'
+    @display(description='النتيجة', label={
+        'safe': 'success',
+        'suspicious': 'warning',
+        'dangerous': 'danger',
+    })
+    def result_label(self, obj):
+        return obj.result
 
-    def scan_level_badge(self, obj):
-        return format_html(
-            '<span style="background:#374151;color:#e5e7eb;padding:2px 6px;'
-            'border-radius:4px;">{}</span>', obj.scan_level)
-    scan_level_badge.short_description = 'المستوى'
+    @display(description='صلاحية الكاش', label={
+        'نشط': 'success',
+        'منتهي': 'danger',
+    })
+    def is_active(self, obj):
+        if obj.expires_at and obj.expires_at < timezone.now():
+            return 'منتهي'
+        return 'نشط'
 
+    @display(description='تاريخ الانتهاء')
     def expires_display(self, obj):
         if obj.expires_at:
             return obj.expires_at.strftime('%Y-%m-%d %H:%M')
         return '—'
-    expires_display.short_description = 'ينتهي في'
 
-    def is_expired_badge(self, obj):
-        if obj.expires_at and obj.expires_at < timezone.now():
-            return format_html('<span style="color:#dc2626;">❌ منتهي</span>')
-        return format_html('<span style="color:#16a34a;">✅ نشط</span>')
-    is_expired_badge.short_description = 'الحالة'
-
-    @admin.action(description='🧹 حذف الكاش المنتهي')
-    def clear_expired_cache(self, request, queryset):
+    @action(description='حذف الكاش المنتهي', icon='mop')
+    def clear_expired_cache(self, request, queryset=None):
         count = ScanCache.objects.filter(expires_at__lt=timezone.now()).delete()[0]
-        self.message_user(request, f'تم حذف {count} سجل كاش منتهي.')
+        self.message_user(request, f'تم تفريغ {count} سجل كاش منتهي الصلاحية.')
 
-    @admin.action(description='⚠️ حذف كل الكاش')
-    def clear_all_cache(self, request, queryset):
+    @action(description='حذف كافة سجلات الكاش', icon='delete_forever')
+    def clear_all_cache(self, request, queryset=None):
         count = ScanCache.objects.all().delete()[0]
         self.message_user(request, f'تم حذف {count} سجل كاش.')
 
@@ -349,10 +325,10 @@ class ScanCacheAdmin(admin.ModelAdmin):
 # ═══════════════════════════════════════════════════════════════════════════
 
 @admin.register(Blacklist)
-class BlacklistAdmin(admin.ModelAdmin):
+class BlacklistAdmin(ModelAdmin):
     list_display = [
-        'domain', 'link_short', 'threat_type_badge', 'severity_badge',
-        'source', 'is_active_badge', 'added_at',
+        'domain_header', 'threat_label', 'severity_label',
+        'source', 'is_active', 'added_at',
     ]
     list_filter = [
         'threat_type', 'severity', 'is_active',
@@ -362,65 +338,60 @@ class BlacklistAdmin(admin.ModelAdmin):
     list_per_page = 30
     ordering = ['-added_at']
     date_hierarchy = 'added_at'
-    
     actions = ['activate_selected', 'deactivate_selected']
+    actions_list = ['activate_selected']
+    list_filter_submit = True
+    list_fullwidth = True
 
-    def link_short(self, obj):
-        link = obj.link or ''
-        return link[:50] + '…' if len(link) > 50 else (link or '—')
-    link_short.short_description = 'الرابط'
+    @display(description='النطاق أو الرابط المحظور', header=True)
+    def domain_header(self, obj):
+        link_part = obj.link[:40] + '…' if obj.link and len(obj.link) > 40 else (obj.link or 'نطاق كامل')
+        return [obj.domain or obj.link, link_part]
 
-    def threat_type_badge(self, obj):
-        colors = {
-            'phishing': '#dc2626', 'malware': '#7c3aed',
-            'scam': '#ea580c', 'spam': '#f59e0b', 'other': '#6b7280',
-        }
-        color = colors.get(obj.threat_type, '#6b7280')
-        return format_html(
-            '<span style="background:{};color:#fff;padding:2px 8px;'
-            'border-radius:8px;font-size:0.85em;">{}</span>',
-            color, obj.get_threat_type_display())
-    threat_type_badge.short_description = 'نوع التهديد'
+    @display(description='نوع التهديد', label={
+        'phishing': 'danger',
+        'malware': 'danger',
+        'scam': 'warning',
+        'spam': 'warning',
+        'other': 'info',
+    })
+    def threat_label(self, obj):
+        return obj.threat_type
 
-    def severity_badge(self, obj):
-        colors = {'low': '#6b7280', 'medium': '#f59e0b', 'high': '#ea580c', 'critical': '#dc2626'}
-        color = colors.get(obj.severity, '#6b7280')
-        return format_html(
-            '<span style="color:{};font-weight:bold;">{}</span>',
-            color, obj.get_severity_display())
-    severity_badge.short_description = 'الخطورة'
+    @display(description='الخطورة', label={
+        'critical': 'danger',
+        'high': 'danger',
+        'medium': 'warning',
+        'low': 'info',
+    })
+    def severity_label(self, obj):
+        return obj.severity
 
-    def is_active_badge(self, obj):
-        if obj.is_active:
-            return format_html('<span style="color:#16a34a;">🟢 نشط</span>')
-        return format_html('<span style="color:#dc2626;">🔴 معطل</span>')
-    is_active_badge.short_description = 'الحالة'
-
-    @admin.action(description='✅ تفعيل المحدد')
+    @action(description='✅ تفعيل المحدد', icon='check_circle')
     def activate_selected(self, request, queryset):
         count = queryset.update(is_active=True)
-        self.message_user(request, f'تم تفعيل {count} سجل.')
+        self.message_user(request, f'تم تفعيل {count} سجل حظر.')
 
-    @admin.action(description='❌ تعطيل المحدد')
+    @action(description='❌ تعطيل المحدد', icon='cancel')
     def deactivate_selected(self, request, queryset):
         count = queryset.update(is_active=False)
-        self.message_user(request, f'تم تعطيل {count} سجل.')
+        self.message_user(request, f'تم تعطيل {count} سجل حظر.')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# WHITELIST ADMIN (NEW)
+# WHITELIST ADMIN
 # ═══════════════════════════════════════════════════════════════════════════
 
 @admin.register(WhitelistEntry)
-class WhitelistEntryAdmin(admin.ModelAdmin):
+class WhitelistEntryAdmin(ModelAdmin):
     list_display = [
-        'domain_display',
-        'source_badge',
-        'is_active_badge',
+        'domain_header',
+        'source_label',
+        'is_active',
         'added_by_display',
         'reason_short',
-        'created_at_display',
         'expiry_badge',
+        'created_at_display',
     ]
     list_filter = [
         'is_active',
@@ -434,88 +405,77 @@ class WhitelistEntryAdmin(admin.ModelAdmin):
     date_hierarchy = 'created_at'
     list_select_related = ['added_by']
     readonly_fields = ['id', 'created_at', 'updated_at']
+    actions = ['activate_selected', 'deactivate_selected', 'remove_expired']
+    actions_list = ['activate_selected']
+    list_filter_submit = True
+    list_fullwidth = True
     
     fieldsets = (
-        ('معلومات الدومين', {
+        ('معلومات النطاق المعتمد', {
             'fields': ('domain', 'is_active'),
         }),
-        ('التصنيف', {
+        ('التصنيف والمبررات الأمنية', {
             'fields': ('source', 'reason', 'notes'),
         }),
-        ('الإدارة', {
+        ('بيانات الإدارة والانتهاء', {
             'fields': ('added_by', 'expires_at'),
         }),
-        ('التواريخ', {
+        ('سجلات التوقيت', {
             'fields': ('created_at', 'updated_at'),
         }),
     )
-    
-    actions = ['activate_selected', 'deactivate_selected', 'remove_expired']
 
-    def domain_display(self, obj):
-        return format_html(
-            '<span style="font-family:monospace;font-weight:bold;color:#16a34a;'
-            'font-size:1.05em;">{}</span>', obj.domain)
-    domain_display.short_description = 'الدومين'
+    @display(description='النطاق الموثوق', header=True)
+    def domain_header(self, obj):
+        reason_txt = obj.reason[:35] + '…' if obj.reason and len(obj.reason) > 35 else (obj.reason or 'اعتماد أمني')
+        return [obj.domain, reason_txt]
 
-    def source_badge(self, obj):
-        colors = {
-            'admin': '#3b82f6', 'auto_verified': '#16a34a',
-            'scan_history': '#8b5cf6', 'bloom_promoted': '#f59e0b',
-        }
-        color = colors.get(obj.source, '#6b7280')
-        return format_html(
-            '<span style="background:{};color:#fff;padding:2px 8px;'
-            'border-radius:8px;font-size:0.85em;">{}</span>',
-            color, obj.get_source_display())
-    source_badge.short_description = 'المصدر'
+    @display(description='المصدر', label={
+        'admin': 'primary',
+        'auto_verified': 'success',
+        'scan_history': 'info',
+        'bloom_promoted': 'warning',
+    })
+    def source_label(self, obj):
+        return obj.source
 
-    def is_active_badge(self, obj):
-        if obj.is_active:
-            return format_html('<span style="color:#16a34a;font-weight:bold;">🟢 نشط</span>')
-        return format_html('<span style="color:#dc2626;font-weight:bold;">🔴 معطل</span>')
-    is_active_badge.short_description = 'الحالة'
-
+    @display(description='أضافه')
     def added_by_display(self, obj):
-        if obj.added_by:
-            return obj.added_by.email
-        return format_html('<span style="color:#9ca3af;">نظام</span>')
-    added_by_display.short_description = 'أضافه'
+        return obj.added_by.email if obj.added_by else 'النظام الآلي'
 
+    @display(description='السبب')
     def reason_short(self, obj):
-        reason = obj.reason or ''
-        return reason[:40] + '…' if len(reason) > 40 else (reason or '—')
-    reason_short.short_description = 'السبب'
+        return obj.reason[:40] + '…' if obj.reason and len(obj.reason) > 40 else (obj.reason or '—')
 
+    @display(description='تاريخ الإضافة')
     def created_at_display(self, obj):
         return obj.created_at.strftime('%Y-%m-%d %H:%M')
-    created_at_display.short_description = 'تاريخ الإضافة'
 
+    @display(description='صلاحية الاعتماد', label={
+        'دائم': 'success',
+        'منتهي': 'danger',
+        'محدد': 'info',
+    })
     def expiry_badge(self, obj):
         if not obj.expires_at:
-            return format_html('<span style="color:#16a34a;">♾️ دائم</span>')
+            return 'دائم'
         if obj.expires_at < timezone.now():
-            return format_html(
-                '<span style="color:#dc2626;">❌ منتهي ({})</span>',
-                obj.expires_at.strftime('%Y-%m-%d'))
-        return format_html(
-            '<span style="color:#3b82f6;">⏰ {}</span>',
-            obj.expires_at.strftime('%Y-%m-%d'))
-    expiry_badge.short_description = 'الانتهاء'
+            return 'منتهي'
+        return 'محدد'
 
-    @admin.action(description='✅ تفعيل المحدد')
+    @action(description='تفعيل المحدد', icon='check_circle')
     def activate_selected(self, request, queryset):
         count = queryset.update(is_active=True)
-        self.message_user(request, f'تم تفعيل {count} دومين.')
+        self.message_user(request, f'تم تفعيل {count} نطاق موثوق.')
 
-    @admin.action(description='❌ تعطيل المحدد')
+    @action(description='تعطيل المحدد', icon='cancel')
     def deactivate_selected(self, request, queryset):
         count = queryset.update(is_active=False)
-        self.message_user(request, f'تم تعطيل {count} دومين.')
+        self.message_user(request, f'تم تعطيل {count} نطاق.')
 
-    @admin.action(description='🧹 إزالة المنتهية الصلاحية')
-    def remove_expired(self, request, queryset):
+    @action(description='إزالة المنتهية الصلاحية', icon='cleaning_services')
+    def remove_expired(self, request, queryset=None):
         count = WhitelistEntry.objects.filter(
             expires_at__lt=timezone.now()
         ).update(is_active=False)
-        self.message_user(request, f'تم تعطيل {count} دومين منتهي الصلاحية.')
+        self.message_user(request, f'تم تعطيل {count} نطاق منتهي الصلاحية.')

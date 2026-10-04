@@ -46,3 +46,71 @@ def extract_domain(url: str) -> Optional[str]:
     if info["registrable_domain"]:
         return info["registrable_domain"]
     return info["fqdn"] if info["fqdn"] else None
+
+
+def extract_canonical_labels(url_or_host: str) -> dict:
+    """
+    Extracts canonical domain labels, decoded IDNA tokens, and domain parts.
+    Single source of truth for domain parsing across all engines.
+    """
+    if not url_or_host:
+        return {
+            "fqdn": "",
+            "registrable_domain": "",
+            "subdomain": "",
+            "main_part": "",
+            "tokens": set(),
+            "labels": []
+        }
+
+    raw = url_or_host.strip().lower()
+    # Remove scheme if present
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    # Remove path, query, fragment
+    raw = raw.split("/")[0].split("?")[0].split("#")[0]
+    # Remove port if present
+    if ":" in raw and not raw.startswith("["):  # not IPv6 literal
+        raw = raw.split(":", 1)[0]
+    raw = raw.rstrip(".")
+
+    # Decode IDNA / Punycode if any label starts with xn--
+    try:
+        import idna
+        decoded_labels = []
+        for part in raw.split("."):
+            if part.startswith("xn--"):
+                try:
+                    decoded_labels.append(idna.decode(part).lower())
+                except Exception:
+                    decoded_labels.append(part)
+            else:
+                decoded_labels.append(part)
+        raw = ".".join(decoded_labels)
+    except Exception:
+        pass
+
+    info = extract_domain_info(raw)
+    registrable = (info.get("registrable_domain") or raw).lower()
+    subdomain = (info.get("subdomain") or "").lower()
+    domain_name = (info.get("domain") or "").lower()
+    fqdn = (info.get("fqdn") or raw).lower()
+
+    # Extract all discrete tokens split by common delimiters ('-', '_', '.')
+    import re
+    tokens = set()
+    for part in (subdomain, domain_name):
+        if part:
+            sub_tokens = [t for t in re.split(r'[-_.]+', part) if t]
+            tokens.update(sub_tokens)
+
+    labels = [l for l in raw.split(".") if l]
+
+    return {
+        "fqdn": fqdn,
+        "registrable_domain": registrable,
+        "subdomain": subdomain,
+        "main_part": domain_name,
+        "tokens": tokens,
+        "labels": labels
+    }

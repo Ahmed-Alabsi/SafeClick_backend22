@@ -24,6 +24,10 @@ class ScanResultSerializer(serializers.ModelSerializer):
         data['responseTime'] = data.get('response_time')
         data['timestamp'] = data.get('created_at')
         
+        # [CRITICAL FIX]: Ensure history API returns the safety score (100 - risk_score)
+        # instead of the legacy database risk_score, preventing 100% -> 0% flip on refresh.
+        data['score'] = instance.safety_score
+        
         # Detailed report passed through details field
         data['detailed_report'] = instance.details
         

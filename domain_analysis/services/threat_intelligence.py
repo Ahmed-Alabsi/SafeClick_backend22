@@ -36,8 +36,8 @@ _CACHE_LOCK = threading.Lock()
 _LAST_FETCH = 0
 
 # Paths for local data
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-MASTER_BLACKLIST_FILE = DATA_DIR / "master_blacklist.csv"
+_BASE_DIR = Path(__file__).resolve().parent.parent
+MASTER_BLACKLIST_FILE = _BASE_DIR / "master_blacklist.csv" if (_BASE_DIR / "master_blacklist.csv").exists() else _BASE_DIR / "data" / "master_blacklist.csv"
 
 
 def _canonicalize_url(url: str) -> str:

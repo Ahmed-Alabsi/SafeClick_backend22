@@ -3,7 +3,7 @@ import uuid
 from datetime import timedelta
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
 
 class UserManager(BaseUserManager):
@@ -67,7 +67,7 @@ class EmailVerification(models.Model):
     email = models.EmailField(unique=True)
     name = models.CharField(max_length=255, blank=True)
     password = models.CharField(max_length=128, blank=True)
-    otp = models.CharField(max_length=6)
+    otp = models.CharField(max_length=128)
     purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, default='register')
     
     # Security fields
@@ -81,6 +81,17 @@ class EmailVerification(models.Model):
 
     def set_password(self, raw_password):
         self.password = make_password(raw_password)
+
+    def set_otp(self, raw_otp):
+        self.otp = make_password(raw_otp)
+
+    def check_otp(self, raw_otp):
+        if not self.otp:
+            return False
+        try:
+            return check_password(raw_otp, self.otp)
+        except Exception:
+            return False
 
     def __str__(self):
         return f"Verification ({self.purpose}) for {self.email}"
@@ -99,6 +110,7 @@ def get_guest_expiry():
 class GuestSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
+    scans_used = models.IntegerField(default=0, verbose_name='عدد الفحوصات المستهلكة')
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(default=get_guest_expiry)
     is_active = models.BooleanField(default=True)
@@ -106,5 +118,40 @@ class GuestSession(models.Model):
     def is_valid(self):
         return self.is_active and self.expires_at > timezone.now()
 
+    @classmethod
+    def check_and_increment_quota(cls, guest_id, limit=3) -> tuple[bool, int]:
+        """
+        Atomically checks and increments guest scan quota using row-level locking (select_for_update).
+        Guarantees zero race conditions even under heavy concurrent load and when Redis is down.
+        Returns (allowed: bool, current_count: int).
+        """
+        from django.db import transaction
+        with transaction.atomic():
+            session = cls.objects.select_for_update().filter(
+                id=guest_id,
+                is_active=True,
+                expires_at__gt=timezone.now()
+            ).first()
+            if not session:
+                return False, 0
+            if session.scans_used >= limit:
+                return False, session.scans_used
+            session.scans_used += 1
+            session.save(update_fields=['scans_used'])
+            return True, session.scans_used
+
+    @classmethod
+    def rollback_quota(cls, guest_id):
+        """Rollback 1 scan quota if scan execution failed unexpectedly."""
+        from django.db import transaction
+        try:
+            with transaction.atomic():
+                session = cls.objects.select_for_update().filter(id=guest_id).first()
+                if session and session.scans_used > 0:
+                    session.scans_used -= 1
+                    session.save(update_fields=['scans_used'])
+        except Exception:
+            pass
+
     def __str__(self):
-        return f"Guest {self.id} (Active: {self.is_valid()})"
+        return f"Guest {self.id} (Active: {self.is_valid()}, Scans: {self.scans_used})"

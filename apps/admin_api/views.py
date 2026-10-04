@@ -5,16 +5,18 @@ from django.utils import timezone
 from datetime import timedelta
 from django.db.models import Count, Q
 
-from apps.scans.models import Scan, WhitelistEntry, Blacklist, ScanCache
+from apps.scans.models import Scan, WhitelistEntry, Blacklist, ScanCache, ScanSourceResult
 from apps.domains.models import Domain
 from apps.accounts.models import User
 from apps.reports.models import Report
+from apps.feedback.models import AppRating
 from apps.monitoring.models import AuditLog
 
 from .serializers import (
     DashboardScanSerializer, ScanDetailSerializer, DashboardDomainSerializer,
     WhitelistSerializer, BlacklistReadSerializer, BlacklistCreateSerializer,
-    UserSerializer, ScanCacheSerializer, ReportSerializer
+    UserSerializer, UserCreateSerializer, UserUpdateSerializer, ScanCacheSerializer, ReportSerializer, ReportUpdateSerializer,
+    AppRatingSerializer, ScanSourceResultSerializer
 )
 
 
@@ -256,10 +258,16 @@ from rest_framework.decorators import action
 
 class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
-    serializer_class = UserSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['email', 'name']
     ordering_fields = ['created_at', 'scanned_links', 'detected_threats']
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return UserCreateSerializer
+        elif self.action in ['update', 'partial_update']:
+            return UserUpdateSerializer
+        return UserSerializer
 
     def get_queryset(self):
         queryset = User.objects.all().order_by('-created_at')
@@ -302,17 +310,105 @@ class UserViewSet(viewsets.ModelViewSet):
 
 class ScanCacheViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
-    queryset = ScanCache.objects.all().order_by('-scanned_at')
     serializer_class = ScanCacheSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['url', 'result']
     ordering_fields = ['scanned_at']
 
+    def get_queryset(self):
+        queryset = ScanCache.objects.all().order_by('-scanned_at')
+        scan_level = self.request.query_params.get('scan_level')
+        result = self.request.query_params.get('result')
 
-class ReportViewSet(viewsets.ReadOnlyModelViewSet):
+        if scan_level:
+            queryset = queryset.filter(scan_level=scan_level)
+        if result:
+            queryset = queryset.filter(result=result)
+
+        return queryset
+
+    @action(detail=False, methods=['post'])
+    def clear_expired(self, request):
+        from django.utils import timezone
+        deleted_count, _ = ScanCache.objects.filter(expires_at__lt=timezone.now()).delete()
+        return Response({'status': 'success', 'deleted': deleted_count, 'message': f'تم حذف {deleted_count} سجل منتهي.'})
+
+class AppRatingViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminUser]
-    queryset = Report.objects.select_related('user').all().order_by('-created_at')
+    serializer_class = AppRatingSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['created_at', 'rating']
+
+    def get_queryset(self):
+        queryset = AppRating.objects.select_related('user').all().order_by('-created_at')
+        rating = self.request.query_params.get('rating')
+        if rating:
+            queryset = queryset.filter(rating=rating)
+        return queryset
+
+class ScanSourceResultViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
+    serializer_class = ScanSourceResultSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['scan__url']
+    ordering_fields = ['checked_at', 'latency_ms', 'confidence']
+
+    def get_queryset(self):
+        queryset = ScanSourceResult.objects.select_related('scan').all().order_by('-checked_at')
+        source_type = self.request.query_params.get('source_type')
+        verdict = self.request.query_params.get('verdict')
+
+        if source_type:
+            queryset = queryset.filter(source_type=source_type)
+        if verdict:
+            queryset = queryset.filter(verdict=verdict)
+
+        return queryset
+
+    @action(detail=False, methods=['post'])
+    def bulk_delete(self, request):
+        ids = request.data.get('ids', [])
+        if not ids:
+            return Response({'status': 'error', 'message': 'لا توجد معرفات محددة'}, status=400)
+        
+        deleted_count, _ = ScanSourceResult.objects.filter(id__in=ids).delete()
+        
+        # Log this action
+        AuditLog.objects.create(
+            user=request.user,
+            action='DELETE',
+            resource_type='ScanSourceResult',
+            resource_id='multiple',
+            details=f"Bulk deleted {deleted_count} scan source results.",
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
+        
+        return Response({'status': 'success', 'message': f'تم حذف {deleted_count} سجل بنجاح'})
+
+
+class ReportViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated, IsAdminUser]
     serializer_class = ReportSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['link', 'user__email', 'category']
-    ordering_fields = ['created_at']
+    search_fields = ['link', 'user__email', 'category', 'tracking_number']
+    ordering_fields = ['created_at', 'severity']
+
+    def get_queryset(self):
+        queryset = Report.objects.select_related('user').all().order_by('-created_at')
+        status_filter = self.request.query_params.get('status', None)
+        severity_filter = self.request.query_params.get('severity', None)
+
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        if severity_filter:
+            try:
+                queryset = queryset.filter(severity=int(severity_filter))
+            except ValueError:
+                pass
+        
+        return queryset
+
+    def get_serializer_class(self):
+        if self.action in ['update', 'partial_update']:
+            return ReportUpdateSerializer
+        return ReportSerializer
